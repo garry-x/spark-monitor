@@ -1,0 +1,80 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "OpenCode Service Status",
+    "tags": ["opencode"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 0,
+    "refresh": "10s",
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Service Availability",
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "spark_monitor_opencode_service_up{service=\"opencode\"}",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "graph",
+        "title": "Response Latency (seconds)",
+        "gridPos": {"x": 6, "y": 0, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "spark_monitor_opencode_response_latency_seconds{service=\"opencode\"}",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "Request Rate (requests/second)",
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "sum by (endpoint) (rate(spark_monitor_opencode_requests_total{service=\"opencode\"}[1m]))",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "type": "graph",
+        "title": "Error Rate (errors/second)",
+        "gridPos": {"x": 12, "y": 4, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "sum by (endpoint) (rate(spark_monitor_opencode_errors_total{service=\"opencode\"}[1m]))",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ]
+      }
+    ]
+  }
+}
