@@ -53,6 +53,17 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
 
+  # OpenCode service health checker
+  opencode-exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile.opencode_exporter
+    container_name: opencode_exporter
+    ports:
+      - "9105:9105"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}  # Pass through if needed
+
 volumes:
   prometheus_data:
   grafana_data:
