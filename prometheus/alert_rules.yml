@@ -1,0 +1,89 @@
+groups:
+  - name: system-alerts
+    rules:
+      - alert: HighCPUUsage
+        expr: avg by (instance) (100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for more than 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% for more than 5 minutes."
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) / node_filesystem_size_bytes{fstype!="tmpfs"} * 100 > 90
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: "Disk usage is above 90% for more than 15 minutes."
+
+  - name: gpu-alerts
+    rules:
+      - alert: GPUTemperatureHigh
+        expr: DCGM_FI_DEV_GPU_TEMP > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GPU temperature on {{ $labels.instance }} GPU {{ $labels.gpu }}"
+          description: "GPU temperature is above 80°C for more than 5 minutes."
+
+      - alert: GPUMemoryUsageHigh
+        expr: DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High GPU memory usage on {{ $labels.instance }} GPU {{ $labels.gpu }}"
+          description: "GPU memory usage is above 90% for more than 5 minutes."
+
+  - name: vllm-alerts
+    rules:
+      - alert: VLLMLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(vllm:request_latency_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High vLLM request latency on {{ $labels.instance }}"
+          description: "95th percentile request latency is above 2 seconds for more than 5 minutes."
+
+      - alert: VLLMQueueLengthHigh
+        expr: vllm:num_requests_waiting > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High vLLM queue length on {{ $labels.instance }}"
+          description: "Number of waiting requests is above 10 for more than 5 minutes."
+
+  - name: opencode-alerts
+    rules:
+      - alert: OpencodeServiceDown
+        expr: spark_monitor_opencode_service_up{service="opencode"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Opencode service {{ $labels.endpoint }} is down"
+          description: "Opencode service endpoint has been down for more than 2 minutes."
+
+      - alert: OpencodeHighLatency
+        expr: spark_monitor_opencode_response_latency_seconds{service="opencode"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response latency for Opencode service {{ $labels.endpoint }}"
+          description: "Response latency is above 5 seconds for more than 5 minutes."
