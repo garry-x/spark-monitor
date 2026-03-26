@@ -14,14 +14,20 @@ services:
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem.ignored-mount-points=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/.+)[:]'
       - '--collector.filesystem.ignored-fs-types=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs)'
+      - '--collector.gpu'
 
-  # GPU metrics collector (placeholder - will be replaced with actual implementation)
+  # GPU metrics collector - NVIDIA DCGM Exporter
   gpu_exporter:
-    build:
-      context: ./gpu_exporter
+    image: nvidia/dcgm-exporter:4.5.2-4.8.1-distroless
     container_name: gpu_exporter
     ports:
       - "9400:9400"
+    environment:
+      - DCGM_EXPORTER_LISTEN_ADDRESS=0.0.0.0:9400
+      - DCGM_EXPORTER_UPDATE_FREQUENCY=1
+      - DCGM_EXPORTER_EXPORT_DEFAULT_METRICS=true
+    volumes:
+      - ./custom-dcgm-counters.csv:/etc/dcgm-exporter/default-counters.csv:ro
 
   # Prometheus server
   prometheus:

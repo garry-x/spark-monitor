@@ -103,3 +103,8 @@ Use Prometheus conventions:
 - Horizontal scaling of exporters if needed
 - Prometheus federation for large deployments
 - Grafana can handle multiple users and dashboards
+
+## Management
+- CLI tool (`spark-monitor-cli`) for easy management of all services
+- Provides start/stop/restart/status/logs/health commands
+- Simplifies deployment and operational tasks

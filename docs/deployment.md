@@ -42,17 +42,16 @@ Spark-Monitor uses a layered architecture with specialized exporters for each su
 - **Metrics**: CPU, memory, disk, network, filesystem
 - **Configuration**: Optimized for containerized environments
 
-### GPU Metrics (placeholder)
-- **Image**: `prom/busybox:latest` (placeholder)
+### GPU Metrics (NVIDIA DCGM Exporter)
+- **Image**: `nvidia/dcgm-exporter:4.5.2-4.8.1-distroless`
 - **Port**: 9400
-- **Note**: This is a placeholder. For production, replace with actual GPU exporter like:
-  - NVIDIA DCGM Exporter
-  - prometheus/gpu-exporter
+- **Metrics**: GPU utilization, memory usage, temperature, power draw, and other DCGM metrics
+- **Note**: Using official NVIDIA DCGM Exporter for comprehensive GPU monitoring
 
 ### vLLM Metrics
 - **Source**: vLLM built-in Prometheus endpoint
 - **Port**: Typically 8000-8001 (configure in vLLM startup)
-- **Metrics**: Request latency, throughput, active requests, queue length
+- **Metrics**: Request latency, throughput, active requests, queue length, TTFT, token rates, cache usage, etc.
 - **Requirement**: vLLM must be started with `--enable-metrics` flag
 
 ### OpenCode Service Health Checker
@@ -93,11 +92,17 @@ Spark-Monitor uses a layered architecture with specialized exporters for each su
 git clone <repository_url>
 cd spark-monitor
 
-# Start all services
-make up
+# Start all services (choose one method):
+  # Method 1: Using Makefile
+  make up
+  
+  # Method 2: Using CLI tool (recommended)
+  ./spark-monitor-cli start
 
 # Verify services started correctly
 ./scripts/health_check.sh
+  # OR
+  ./spark-monitor-cli health
 ```
 
 ### 3. Access Dashboards

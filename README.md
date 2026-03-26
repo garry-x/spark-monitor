@@ -19,16 +19,24 @@ Based on open-source platforms like Prometheus and Grafana for web-based visuali
 
 1. Clone the repository
 2. Start the monitoring stack:
-   ```bash
-   make up
-   ```
+    ```bash
+    make up
+    ```
+    OR
+    ```bash
+    ./spark-monitor-cli start
+    ```
 3. Access the services:
-   - Prometheus: http://localhost:9090
-   - Grafana: http://localhost:3000 (admin/admin)
+    - Prometheus: http://localhost:9090
+    - Grafana: http://localhost:3000 (admin/admin)
 4. Verify all services are healthy:
-   ```bash
-   ./scripts/health_check.sh
-   ```
+    ```bash
+    ./scripts/health_check.sh
+    ```
+    OR
+    ```bash
+    ./spark-monitor-cli health
+    ```
 
 ### Services
 

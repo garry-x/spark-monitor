@@ -21,7 +21,7 @@ else
     echo "✗ node_exporter is not serving metrics"
 fi
 
-# Check gpu_exporter (placeholder)
+# Check gpu_exporter (NVIDIA SMI based)
 echo "Checking gpu_exporter..."
 curl -s http://localhost:9400/metrics | grep gpu_utilization > /dev/null
 if [ $? -eq 0 ]; then

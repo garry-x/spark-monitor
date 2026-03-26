@@ -1,0 +1,422 @@
+{
+  "id": null,
+  "uid": "dgxspark-overview",
+  "title": "DGXSpark Overview",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 0,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "CPU Usage",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "100 - (avg by(instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Percentage of CPU utilization across all cores",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Memory Usage",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Percentage of system memory currently in use",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "GPU Utilization",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "DCGM_FI_DEV_GPU_UTIL",
+          "legendFormat": "GPU {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Percentage of GPU compute utilization",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "GPU Temperature",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "DCGM_FI_DEV_GPU_TEMP",
+          "legendFormat": "GPU {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "GPU die temperature in Celsius",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "GPU Power Draw",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "DCGM_FI_DEV_POWER_USAGE",
+          "legendFormat": "GPU {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "GPU power consumption in watts",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watts",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM TTFT (95th percentile)",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(vllm:time_to_first_token_seconds_bucket[5m])) by (le))",
+          "legendFormat": "95th percentile",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "95th percentile time to first token in seconds",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "seconds",
+          "decimals": 3
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM Generation TPS",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (engine, model_name) (rate(vllm:generation_tokens_total[1m]))",
+          "legendFormat": "{{model_name}} - {{engine}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Generation tokens per second processed by the vLLM engine",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tps",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM Prompt TPS",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (engine, model_name) (rate(vllm:prompt_tokens_total[1m]))",
+          "legendFormat": "{{model_name}} - {{engine}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Prompt tokens per second processed by the vLLM engine",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tps",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM Waiting Requests",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "vllm:num_requests_waiting",
+          "legendFormat": "{{model_name}} - {{engine}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Number of requests waiting to be processed by vLLM",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "requests",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM Request Failures",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (engine, model_name, finished_reason) (rate(vllm:request_success_total{finished_reason!=\"stop\"}[1m]))",
+          "legendFormat": "{{model_name}} - {{finished_reason}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Number of failed requests per second",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "requests",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM Preemptions",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (engine, model_name) (rate(vllm:num_preemptions_total[1m]))",
+          "legendFormat": "{{model_name}} - {{engine}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Number of preemptions per second",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "preemptions",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM E2E Request Latency (95th percentile)",
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(vllm:e2e_request_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "95th percentile",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "95th percentile end-to-end request latency in seconds",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "seconds",
+          "decimals": 3
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM GPU Cache Usage",
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "vllm:kv_cache_usage_perc * 100",
+          "legendFormat": "{{model_name}} - {{engine}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "GPU KV-cache usage percentage",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM Inter Token Latency (95th percentile)",
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(vllm:inter_token_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "95th percentile",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "95th percentile inter-token latency in seconds",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "seconds",
+          "decimals": 3
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "vLLM Active Requests",
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "vllm:num_requests_running",
+          "legendFormat": "{{model_name}} - {{engine}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Number of requests currently being processed by vLLM",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "requests",
+          "decimals": 0
+        }
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

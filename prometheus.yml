@@ -15,6 +15,13 @@ scrape_configs:
     static_configs:
       - targets: ['opencode-exporter:9105']
 
+  # vLLM metrics
+  - job_name: 'vllm'
+    static_configs:
+      - targets: ['172.19.0.1:8000']  # Access host machine from container via host IP
+    metrics_path: /metrics
+    scheme: http
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
