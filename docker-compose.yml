@@ -1,7 +1,7 @@
 services:
   # System metrics collector
   node_exporter:
-    image: prom/node-exporter:latest
+    image: docker.m.daocloud.io/prom/node-exporter:latest
     container_name: node_exporter
     ports:
       - "9100:9100"
@@ -17,15 +17,15 @@ services:
 
   # GPU metrics collector (placeholder - will be replaced with actual implementation)
   gpu_exporter:
-    image: prom/busybox:latest
+    build:
+      context: ./gpu_exporter
     container_name: gpu_exporter
     ports:
       - "9400:9400"
-    command: ["sh", "-c", "while true; do echo 'GPU metrics placeholder'; sleep 30; done"]
 
   # Prometheus server
   prometheus:
-    image: prom/prometheus:latest
+    image: docker.m.daocloud.io/prom/prometheus:latest
     container_name: prometheus
     ports:
       - "9090:9090"
@@ -40,7 +40,7 @@ services:
 
   # Grafana
   grafana:
-    image: grafana/grafana:latest
+    image: docker.m.daocloud.io/grafana/grafana:latest
     container_name: grafana
     ports:
       - "3000:3000"

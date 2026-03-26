@@ -23,7 +23,7 @@ fi
 
 # Check gpu_exporter (placeholder)
 echo "Checking gpu_exporter..."
-curl -s http://localhost:9400/metrics | grep 'GPU metrics placeholder' > /dev/null
+curl -s http://localhost:9400/metrics | grep gpu_utilization > /dev/null
 if [ $? -eq 0 ]; then
     echo "✓ gpu_exporter is serving metrics"
 else

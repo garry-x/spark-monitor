@@ -33,7 +33,7 @@ Based on open-source platforms like Prometheus and Grafana for web-based visuali
 ### Services
 
 - **node_exporter**: System metrics (CPU, memory, I/O) on port 9100
-- **dcgm_exporter**: GPU metrics on port 9400
+- **gpu_exporter**: GPU metrics placeholder on port 9400 (to be replaced with actual implementation)
 - **prometheus**: Metric collection and storage on port 9090
 - **grafana**: Visualization on port 3000
 - **opencode-exporter**: OpenCode service health checks on port 9105

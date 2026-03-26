@@ -14,7 +14,7 @@
         "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
         "targets": [
           {
-            "expr": "DCGM_FI_DEV_GPU_UTIL",
+            "expr": "gpu_utilization",
             "legendFormat": "GPU {{instance}}",
             "refId": "A"
           }
@@ -26,7 +26,7 @@
         "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
         "targets": [
           {
-            "expr": "DCGM_FI_DEV_FB_USED",
+            "expr": "gpu_memory_used_mb / gpu_memory_total_mb * 100",
             "legendFormat": "GPU {{instance}}",
             "refId": "A"
           }
@@ -38,7 +38,7 @@
         "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
         "targets": [
           {
-            "expr": "DCGM_FI_DEV_GPU_TEMP",
+            "expr": "gpu_temperature_celsius",
             "legendFormat": "GPU {{instance}}",
             "refId": "A"
           }
@@ -50,7 +50,7 @@
         "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
         "targets": [
           {
-            "expr": "DCGM_FI_DEV_POWER_USAGE",
+            "expr": "gpu_power_draw_watts",
             "legendFormat": "GPU {{instance}}",
             "refId": "A"
           }
