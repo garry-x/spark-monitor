@@ -129,64 +129,226 @@ cmd_logs() {
     fi
 }
 
-# Show help
-cmd_help() {
-    print_header
-    echo "Usage: spark-monitor-cli [command] [options]"
-    echo
-    echo "Commands:"
-    echo "  status    Show status of all services"
-    echo "  start     Start all services"
-    echo "  stop      Stop all services"
-    echo "  restart   Restart all services"
-    echo "  logs      View logs (add service name for specific service logs)"
-    echo "  help      Show this help message"
-    echo
-    echo "Examples:"
-    echo "  spark-monitor-cli status"
-    echo "  spark-monitor-cli start"
-    echo "  spark-monitor-cli stop"
-    echo "  spark-monitor-cli logs"
-    echo "  spark-monitor-cli logs grafana"
-    echo
+# Query Prometheus API
+query_prometheus() {
+    local query="$1"
+    local encoded_query=$(urlencode "$query")
+    curl -s -f --max-time 10 "http://localhost:9090/api/v1/query?query=${encoded_query}" 2>/dev/null
 }
 
-# Health check endpoint verification
-cmd_health() {
-    check_project_dir
-    
-    print_header
-    print_info "Performing health checks..."
-    
-    # Check if services are accessible
-    local services=(
-        "prometheus:9090"
-        "grafana:3000"
-        "node_exporter:9100"
-        "gpu_exporter:9400"
-        "opencode-exporter:9105"
-        "vllm_node:8000"
-    )
-    
-    all_healthy=true
-    
-    for service in "${services[@]}"; do
-        IFS=':' read -r name port <<< "$service"
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null | grep -q "200\|401\|403"; then
-            print_success "$name (:$port) is accessible"
-        else
-            print_error "$name (:$port) is not accessible"
-            all_healthy=false
-        fi
+urlencode() {
+    local string="$1"
+    local encoded=""
+    local pos c
+    for ((pos=0; pos<${#string}; pos++)); do
+        c="${string:$pos:1}"
+        case "$c" in
+            [-_.~a-zA-Z0-9]) encoded+="$c" ;;
+            *) printf -v c '%%%02x' "'$c" && encoded+="$c" ;;
+        esac
     done
-    
-    if $all_healthy; then
-        print_success "All services are healthy!"
-    else
-        print_error "Some services are not responding correctly"
-        exit 1
-    fi
+    echo "$encoded"
 }
+
+# Show real-time metrics with category filtering
+cmd_monitor() {
+    local category="all"
+    local interval=5
+    local pos_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--interval)
+                interval="$2"
+                shift 2
+                ;;
+            -h|--help)
+                echo "Usage: spark-monitor-cli monitor [category] [-i interval]"
+                echo
+                echo "Show real-time metrics with category filtering"
+                echo
+                echo "Arguments:"
+                echo "  category    Metric category: system, gpu, vllm, or all (default: all)"
+                echo "  -i, --interval    Refresh interval in seconds (default: 5, min: 1, max: 60)"
+                echo "  -h, --help        Show this help message"
+                echo
+                echo "Examples:"
+                echo "  spark-monitor-cli monitor           # All metrics, 5s refresh"
+                echo "  spark-monitor-cli monitor system    # System metrics only"
+                echo "  spark-monitor-cli monitor gpu       # GPU metrics only"
+                echo "  spark-monitor-cli monitor vllm      # vLLM metrics only"
+                echo "  spark-monitor-cli monitor -i 10     # 10s refresh"
+                echo "  spark-monitor-cli monitor vllm -i 3 # vLLM with 3s refresh"
+                echo
+                return 0
+                ;;
+            *)
+                pos_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [[ ${#pos_args[@]} -gt 0 ]]; then
+        category="${pos_args[0]}"
+    fi
+
+    if [[ ! "$interval" =~ ^[0-9]+$ ]] || [[ "$interval" -lt 1 ]] || [[ "$interval" -gt 60 ]]; then
+        print_error "Interval must be a number between 1 and 60"
+        return 1
+    fi
+
+    case "$category" in
+        system|gpu|vllm|all)
+            ;;
+        *)
+            print_error "Invalid category: $category"
+            echo "Valid categories: system, gpu, vllm, all"
+            return 1
+            ;;
+    esac
+
+    print_header
+    echo -e "${GREEN}=== Real-time Metrics Monitor ===${NC}"
+    echo "Category: $category | Refresh: ${interval}s"
+    echo "Press Ctrl+C to exit"
+    echo "-------------------------------"
+    echo
+
+    trap 'echo; print_success "Monitoring stopped"; exit 0' INT
+    trap 'print_error "Error during execution"; exit 1' ERR
+
+    while true; do
+        clear
+        local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+        echo -e "${GREEN}=== Spark Monitor Real-time Metrics ===${NC}"
+        echo "Timestamp: $timestamp"
+        echo "-------------------------------"
+        echo
+
+        case "$category" in
+            system|all)
+                echo -e "${YELLOW}[SYSTEM]${NC}"
+                echo "CPU Usage:"
+                local cpu_result
+                cpu_result=$(query_prometheus '100 - avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100')
+                if [ $? -eq 0 ] && [ -n "$cpu_result" ]; then
+                    local cpu_value
+                    cpu_value=$(echo "$cpu_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                    printf "  CPU Usage: %.2f%%\n" "$cpu_value"
+                else
+                    echo "  CPU Usage: N/A (query failed)"
+                fi
+                echo
+                ;;
+        esac
+
+        case "$category" in
+            gpu|all)
+                echo -e "${YELLOW}[GPU]${NC}"
+                local gpu_util_result gpu_temp_result gpu_power_result
+                gpu_util_result=$(query_prometheus 'DCGM_FI_DEV_GPU_UTIL')
+                gpu_temp_result=$(query_prometheus 'DCGM_FI_DEV_GPU_TEMP')
+                gpu_power_result=$(query_prometheus 'DCGM_FI_DEV_POWER_USAGE')
+                
+                local gpu_util gpu_temp gpu_power
+                gpu_util="N/A"
+                gpu_temp="N/A"
+                gpu_power="N/A"
+                
+                if [ $? -eq 0 ] && [ -n "$gpu_util_result" ]; then
+                    gpu_util=$(echo "$gpu_util_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$gpu_temp_result" ]; then
+                    gpu_temp=$(echo "$gpu_temp_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$gpu_power_result" ]; then
+                    gpu_power=$(echo "$gpu_power_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                
+                printf "  GPU Utilization: %s%%\n" "$gpu_util"
+                printf "  GPU Temperature: %s°C\n" "$gpu_temp"
+                printf "  GPU Power Usage: %s W\n" "$gpu_power"
+                echo
+                ;;
+        esac
+
+        case "$category" in
+            vllm|all)
+                echo -e "${YELLOW}[vLLM]${NC}"
+                local gen_tokens_result prompt_tokens_result pending_result running_result
+                gen_tokens_result=$(query_prometheus 'vllm:generation_tokens_total')
+                prompt_tokens_result=$(query_prometheus 'vllm:prompt_tokens_total')
+                pending_result=$(query_prometheus 'vllm:num_requests_waiting')
+                running_result=$(query_prometheus 'vllm:num_requests_running')
+                
+                local gen_tokens prompt_tokens pending running
+                gen_tokens="N/A"
+                prompt_tokens="N/A"
+                pending="N/A"
+                running="N/A"
+                
+                if [ -n "$gen_tokens_result" ]; then
+                    gen_tokens=$(echo "$gen_tokens_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$prompt_tokens_result" ]; then
+                    prompt_tokens=$(echo "$prompt_tokens_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$pending_result" ]; then
+                    pending=$(echo "$pending_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$running_result" ]; then
+                    running=$(echo "$running_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                
+                printf "  Generated Tokens: %s\n" "$gen_tokens"
+                printf "  Prompt Tokens: %s\n" "$prompt_tokens"
+                printf "  Waiting Requests: %s\n" "$pending"
+                printf "  Running Requests: %s\n" "$running"
+                echo
+                ;;
+        esac
+
+        sleep "$interval"
+    done
+}
+
+    # Health check endpoint verification
+    cmd_health() {
+        check_project_dir
+        
+        print_header
+        print_info "Performing health checks..."
+        
+        # Check if services are accessible
+        local services=(
+            "prometheus:9090"
+            "grafana:3000"
+            "node_exporter:9100"
+            "gpu_exporter:9400"
+            "vllm:8000"
+        )
+        
+        all_healthy=true
+        
+        for service in "${services[@]}"; do
+            IFS=':' read -r name port <<< "$service"
+            # Accept 200 (OK), 302 (redirect, e.g., Prometheus), 401 (unauthorized), 403 (forbidden)
+            if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null | grep -q "200\|302\|401\|403"; then
+                print_success "$name (:$port) is accessible"
+            else
+                print_error "$name (:$port) is not accessible"
+                all_healthy=false
+            fi
+        done
+        
+        if $all_healthy; then
+            print_success "All services are healthy!"
+        else
+            print_error "Some services are not responding correctly"
+            exit 1
+        fi
+    }
 
 # Main script logic
 case "$1" in
@@ -208,6 +370,10 @@ case "$1" in
         ;;
     health)
         cmd_health
+        ;;
+    monitor)
+        shift
+        cmd_monitor "$@"
         ;;
     help|*)
         cmd_help

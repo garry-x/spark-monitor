@@ -14,7 +14,6 @@ services:
       - '--path.sysfs=/host/sys'
       - '--collector.filesystem.ignored-mount-points=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/.+)[:]'
       - '--collector.filesystem.ignored-fs-types=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs)'
-      - '--collector.gpu'
 
   # GPU metrics collector - NVIDIA DCGM Exporter
   gpu_exporter:
@@ -59,16 +58,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
 
-  # OpenCode service health checker
-  opencode-exporter:
-    build:
-      context: .
-      dockerfile: Dockerfile.opencode_exporter
-    container_name: opencode_exporter
-    ports:
-      - "9105:9105"
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}  # Pass through if needed
+  
 
 volumes:
   prometheus_data:

@@ -11,10 +11,6 @@ scrape_configs:
     static_configs:
       - targets: ['gpu_exporter:9400']
 
-  - job_name: 'opencode-exporter'
-    static_configs:
-      - targets: ['opencode-exporter:9105']
-
   # vLLM metrics
   - job_name: 'vllm'
     static_configs:
