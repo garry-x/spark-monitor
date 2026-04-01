@@ -180,6 +180,11 @@ cmd_monitor() {
                 echo "  spark-monitor-cli monitor -i 10     # 10s refresh"
                 echo "  spark-monitor-cli monitor vllm -i 3 # vLLM with 3s refresh"
                 echo
+                echo "vLLM Metrics include:"
+                echo "  - Generated Tokens / Prompt Tokens (cumulative counts)"
+                echo "  - Waiting Requests / Running Requests (scheduler state)"
+                echo "  - Generation TPS / Prompt TPS (tokens per second)"
+                echo
                 return 0
                 ;;
             *)
@@ -218,6 +223,9 @@ cmd_monitor() {
     trap 'echo; print_success "Monitoring stopped"; exit 0' INT
     trap 'print_error "Error during execution"; exit 1' ERR
 
+    local prev_gen_tokens=""
+    local prev_prompt_tokens=""
+
     while true; do
         clear
         local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
@@ -238,6 +246,17 @@ cmd_monitor() {
                     printf "  CPU Usage: %.2f%%\n" "$cpu_value"
                 else
                     echo "  CPU Usage: N/A (query failed)"
+                fi
+                echo
+                echo "Memory Usage:"
+                local mem_result
+                mem_result=$(query_prometheus '(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100')
+                if [ $? -eq 0 ] && [ -n "$mem_result" ]; then
+                    local mem_value
+                    mem_value=$(echo "$mem_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                    printf "  Memory Usage: %.2f%%\n" "$mem_value"
+                else
+                    echo "  Memory Usage: N/A (query failed)"
                 fi
                 echo
                 ;;
@@ -301,12 +320,31 @@ cmd_monitor() {
                     running=$(echo "$running_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                 fi
                 
-                printf "  Generated Tokens: %s\n" "$gen_tokens"
-                printf "  Prompt Tokens: %s\n" "$prompt_tokens"
-                printf "  Waiting Requests: %s\n" "$pending"
-                printf "  Running Requests: %s\n" "$running"
-                echo
-                ;;
+                 printf "  Generated Tokens: %s\n" "$gen_tokens"
+                 printf "  Prompt Tokens: %s\n" "$prompt_tokens"
+                 printf "  Waiting Requests: %s\n" "$pending"
+                 printf "  Running Requests: %s\n" "$running"
+                 
+                 local gen_tps prompt_tps
+                 gen_tps="N/A"
+                 prompt_tps="N/A"
+                 
+                 if [ -n "$gen_tokens_result" ] && [ -n "$prev_gen_tokens" ]; then
+                     local gen_diff=$((gen_tokens - prev_gen_tokens))
+                     gen_tps=$(awk "BEGIN {printf \"%.2f\", $gen_diff / $interval}")
+                 fi
+                 if [ -n "$prompt_tokens_result" ] && [ -n "$prev_prompt_tokens" ]; then
+                     local prompt_diff=$((prompt_tokens - prev_prompt_tokens))
+                     prompt_tps=$(awk "BEGIN {printf \"%.2f\", $prompt_diff / $interval}")
+                 fi
+                 
+                 printf "  Generation TPS: %s tokens/s\n" "$gen_tps"
+                 printf "  Prompt TPS: %s tokens/s\n" "$prompt_tps"
+                 echo
+                 
+                 prev_gen_tokens=$gen_tokens
+                 prev_prompt_tokens=$prompt_tokens
+                 ;;
         esac
 
         sleep "$interval"
