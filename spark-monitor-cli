@@ -213,21 +213,20 @@ cmd_monitor() {
             ;;
     esac
 
-    print_header
     echo -e "${GREEN}=== Real-time Metrics Monitor ===${NC}"
     echo "Category: $category | Refresh: ${interval}s"
     echo "Press Ctrl+C to exit"
     echo "-------------------------------"
     echo
 
-    trap 'echo; print_success "Monitoring stopped"; exit 0' INT
+    trap 'echo; print_success "Monitoring stopped"; exit 0' INT EXIT
     trap 'print_error "Error during execution"; exit 1' ERR
 
     local prev_gen_tokens=""
-    local prev_prompt_tokens=""
 
     while true; do
-        clear
+        printf "\033[2J\033[H"
+        
         local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
         echo -e "${GREEN}=== Spark Monitor Real-time Metrics ===${NC}"
         echo "Timestamp: $timestamp"
