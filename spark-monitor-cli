@@ -150,6 +150,31 @@ urlencode() {
     echo "$encoded"
 }
 
+# Show general help
+cmd_help() {
+    print_header
+    echo "Usage: spark-monitor-cli [command] [options]"
+    echo
+    echo "Commands:"
+    echo "  status    Show status of all services"
+    echo "  start     Start all services"
+    echo "  stop      Stop all services"
+    echo "  restart   Restart all services"
+    echo "  logs      View logs (add service name for specific service logs)"
+    echo "  health    Check health of all services"
+    echo "  monitor   Show real-time metrics (system|gpu|vllm|all) [-i interval]"
+    echo "  help      Show this help message"
+    echo
+    echo "Monitor Examples:"
+    echo "  spark-monitor-cli monitor           # All metrics, 5s refresh"
+    echo "  spark-monitor-cli monitor system    # System metrics only"
+    echo "  spark-monitor-cli monitor gpu       # GPU metrics only"
+    echo "  spark-monitor-cli monitor vllm      # vLLM metrics only"
+    echo "  spark-monitor-cli monitor -i 10     # 10s refresh"
+    echo "  spark-monitor-cli monitor vllm -i 3 # vLLM with 3s refresh"
+    echo
+}
+
 # Show real-time metrics with category filtering
 cmd_monitor() {
     local category="all"
