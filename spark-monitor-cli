@@ -261,7 +261,6 @@ cmd_monitor() {
         case "$category" in
             system|all)
                 echo -e "${YELLOW}[SYSTEM]${NC}"
-                echo "CPU Usage:"
                 local cpu_result
                 cpu_result=$(query_prometheus '100 - avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100')
                 if [ $? -eq 0 ] && [ -n "$cpu_result" ]; then
@@ -271,8 +270,6 @@ cmd_monitor() {
                 else
                     echo "  CPU Usage: N/A (query failed)"
                 fi
-                echo
-                echo "Memory Usage:"
                 local mem_result
                 mem_result=$(query_prometheus '(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100')
                 if [ $? -eq 0 ] && [ -n "$mem_result" ]; then
