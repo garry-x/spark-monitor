@@ -162,6 +162,7 @@ cmd_help() {
     echo "  restart   Restart all services"
     echo "  logs      View logs (add service name for specific service logs)"
     echo "  health    Check health of all services"
+    echo "  ports     Show listening ports and processes [-t|-u|-p|-s]"
     echo "  monitor   Show real-time metrics (system|gpu|vllm|all) [-i interval]"
     echo "  help      Show this help message"
     echo
@@ -409,6 +410,116 @@ cmd_monitor() {
         fi
     }
 
+# Show listening ports and processes
+cmd_ports() {
+    local proto="both"
+    local filter_port=""
+    local sort_by="port"
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -t|--tcp)
+                proto="tcp"
+                shift
+                ;;
+            -u|--udp)
+                proto="udp"
+                shift
+                ;;
+            -p|--port)
+                filter_port="$2"
+                shift 2
+                ;;
+            -s|--sort)
+                sort_by="$2"
+                shift 2
+                ;;
+            -h|--help)
+                echo "Usage: spark-monitor-cli ports [options]"
+                echo
+                echo "Show host listening ports and corresponding processes"
+                echo
+                echo "Options:"
+                echo "  -t, --tcp        Show TCP only"
+                echo "  -u, --udp        Show UDP only"
+                echo "  -p, --port PORT  Filter by port number"
+                echo "  -s, --sort BY    Sort by: port (default), pid, protocol"
+                echo "  -h, --help       Show this help message"
+                echo
+                echo "Examples:"
+                echo "  spark-monitor-cli ports          # All listening ports"
+                echo "  spark-monitor-cli ports -t       # TCP only"
+                echo "  spark-monitor-cli ports -p 9090  # Filter by port 9090"
+                echo "  spark-monitor-cli ports -s pid   # Sort by PID"
+                echo
+                return 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    if ! command -v ss &> /dev/null; then
+        print_error "ss command not found. Please install iproute2."
+        return 1
+    fi
+    
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    echo -e "${GREEN}=== Host Listening Ports ===${NC}"
+    echo "Timestamp: $timestamp"
+    echo "-------------------------------"
+    printf "%-6s %-22s %-8s %s\n" "PROTO" "LOCAL ADDRESS" "PID" "PROCESS"
+    echo "-------------------------------"
+    
+    local tmpfile=$(mktemp)
+    
+    # Always use -tulnp to get consistent column layout
+    ss -tulnp 2>/dev/null | tail -n +2 | awk -v proto_filter="$proto" -v port_filter="$filter_port" '
+    {
+        p = $1
+        local_addr = $5
+        pid = "-"
+        pname = "-"
+        for (i = 7; i <= NF; i++) {
+            if ($i ~ /users:/) {
+                rest = ""
+                for (j = i; j <= NF; j++) rest = rest " " $j
+                if (match(rest, /pid=([0-9]+)/, arr)) pid = arr[1]
+                if (match(rest, /users:\(\("([^"]+)"/, arr)) pname = arr[1]
+                break
+            }
+        }
+        n = split(local_addr, parts, ":")
+        port = parts[n]
+        gsub(/%.*/, "", port)
+        if (port ~ /^[0-9]+$/) {
+            if ((proto_filter == "both" || proto_filter == p) && (port_filter == "" || port == port_filter)) {
+                printf "%-6s %-22s %-8s %s\n", p, local_addr, pid, pname
+            }
+        }
+    }' > "$tmpfile"
+    
+    case "$sort_by" in
+        pid)
+            sort -k3 -n "$tmpfile"
+            ;;
+        protocol)
+            sort -k1 "$tmpfile"
+            ;;
+        *)
+            sort -t: -k2 -n "$tmpfile"
+            ;;
+    esac
+    
+    local count=$(wc -l < "$tmpfile")
+    rm -f "$tmpfile"
+    
+    echo "-------------------------------"
+    echo "Total: $count listening ports"
+}
+
 # Main script logic
 case "$1" in
     status)
@@ -429,6 +540,10 @@ case "$1" in
         ;;
     health)
         cmd_health
+        ;;
+    ports)
+        shift
+        cmd_ports "$@"
         ;;
     monitor)
         shift
