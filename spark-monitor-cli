@@ -162,7 +162,8 @@ cmd_help() {
     echo "  restart   Restart all services"
     echo "  logs      View logs (add service name for specific service logs)"
     echo "  health    Check health of all services"
-    echo "  ports     Show listening ports and processes [-t|-u|-p|-s]"
+    echo "  ports     Show listening ports and processes"
+    echo "            ports check PORT [proto] - Check if port is in use"
     echo "  monitor   Show real-time metrics (system|gpu|vllm|all) [-i interval]"
     echo "  help      Show this help message"
     echo
@@ -415,9 +416,15 @@ cmd_ports() {
     local proto="both"
     local filter_port=""
     local sort_by="port"
+    local use_sudo=false
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            check)
+                shift
+                cmd_ports_check "$@"
+                return $?
+                ;;
             -t|--tcp)
                 proto="tcp"
                 shift
@@ -434,23 +441,32 @@ cmd_ports() {
                 sort_by="$2"
                 shift 2
                 ;;
+            -S|--sudo)
+                use_sudo=true
+                shift
+                ;;
             -h|--help)
                 echo "Usage: spark-monitor-cli ports [options]"
+                echo "       spark-monitor-cli ports check <port> [proto]"
                 echo
                 echo "Show host listening ports and corresponding processes"
                 echo
                 echo "Options:"
-                echo "  -t, --tcp        Show TCP only"
-                echo "  -u, --udp        Show UDP only"
-                echo "  -p, --port PORT  Filter by port number"
-                echo "  -s, --sort BY    Sort by: port (default), pid, protocol"
-                echo "  -h, --help       Show this help message"
+                echo "  check PORT [proto]  Check if a port is in use (proto: tcp/udp/both)"
+                echo "  -t, --tcp           Show TCP only"
+                echo "  -u, --udp           Show UDP only"
+                echo "  -p, --port PORT     Filter by port number"
+                echo "  -s, --sort BY       Sort by: port (default), pid, protocol"
+                echo "  -S, --sudo          Use sudo for full process info"
+                echo "  -h, --help          Show this help message"
                 echo
                 echo "Examples:"
-                echo "  spark-monitor-cli ports          # All listening ports"
-                echo "  spark-monitor-cli ports -t       # TCP only"
-                echo "  spark-monitor-cli ports -p 9090  # Filter by port 9090"
-                echo "  spark-monitor-cli ports -s pid   # Sort by PID"
+                echo "  spark-monitor-cli ports             # All listening ports"
+                echo "  spark-monitor-cli ports -t          # TCP only"
+                echo "  spark-monitor-cli ports -S          # With sudo (shows all PIDs)"
+                echo "  spark-monitor-cli ports -p 9090     # Filter by port 9090"
+                echo "  spark-monitor-cli ports -s pid      # Sort by PID"
+                echo "  spark-monitor-cli ports check 9090  # Check port 9090"
                 echo
                 return 0
                 ;;
@@ -475,8 +491,14 @@ cmd_ports() {
     
     local tmpfile=$(mktemp)
     
+    # Use sudo if requested or if auto-detect succeeds
+    local ss_prefix=""
+    if [[ "$use_sudo" == true ]] || command -v sudo &> /dev/null && sudo -n true 2>/dev/null; then
+        ss_prefix="sudo"
+    fi
+    
     # Always use -tulnp to get consistent column layout
-    ss -tulnp 2>/dev/null | tail -n +2 | awk -v proto_filter="$proto" -v port_filter="$filter_port" '
+    $ss_prefix ss -tulnp 2>/dev/null | tail -n +2 | awk -v proto_filter="$proto" -v port_filter="$filter_port" '
     {
         p = $1
         local_addr = $5
@@ -518,6 +540,161 @@ cmd_ports() {
     
     echo "-------------------------------"
     echo "Total: $count listening ports"
+}
+
+# Check if a specific port is in use
+cmd_ports_check() {
+    if [[ $# -lt 1 ]]; then
+        print_error "Usage: spark-monitor-cli ports check <port> [proto]"
+        echo
+        echo "Check if a specific port is in use"
+        echo
+        echo "Arguments:"
+        echo "  port    Port number to check"
+        echo "  proto   Protocol: tcp, udp, or both (default: tcp)"
+        echo
+        echo "Examples:"
+        echo "  spark-monitor-cli ports check 9090"
+        echo "  spark-monitor-cli ports check 9090 udp"
+        echo
+        return 1
+    fi
+    
+    local port="$1"
+    local proto="${2:-tcp}"
+    
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        print_error "Invalid port number: $port"
+        return 1
+    fi
+    
+    if [[ "$proto" != "tcp" && "$proto" != "udp" && "$proto" != "both" ]]; then
+        print_error "Invalid protocol: $proto (must be tcp, udp, or both)"
+        return 1
+    fi
+    
+    local ss_prefix=""
+    if command -v sudo &> /dev/null && sudo -n true 2>/dev/null; then
+        ss_prefix="sudo"
+    fi
+    
+    echo -e "${GREEN}=== Port Check ===${NC}"
+    echo "Checking port: $port ($proto)"
+    echo "-------------------------------"
+    
+    local found=$($ss_prefix ss -tulnp 2>/dev/null | tail -n +2 | awk -v target_port="$port" -v proto_filter="$proto" '
+    {
+        p = $1
+        local_addr = $5
+        pid = "-"
+        pname = "-"
+        for (i = 7; i <= NF; i++) {
+            if ($i ~ /users:/) {
+                rest = ""
+                for (j = i; j <= NF; j++) rest = rest " " $j
+                if (match(rest, /pid=([0-9]+)/, arr)) pid = arr[1]
+                if (match(rest, /users:\(\("([^"]+)"/, arr)) pname = arr[1]
+                break
+            }
+        }
+        n = split(local_addr, parts, ":")
+        port = parts[n]
+        gsub(/%.*/, "", port)
+        if (port == target_port && (proto_filter == "both" || proto_filter == p)) {
+            printf "  %-6s %-22s PID: %-8s Process: %s\n", p, local_addr, pid, pname
+        }
+    }')
+    
+    if [[ -n "$found" ]]; then
+        echo "$found"
+        echo "-------------------------------"
+        print_warning "Port $port ($proto) is IN USE"
+    else
+        echo "  No processes listening on this port"
+        echo "-------------------------------"
+        print_success "Port $port ($proto) is AVAILABLE"
+    fi
+}
+
+# Check if a specific port is in use
+cmd_ports_check() {
+    if [[ -z "$1" ]]; then
+        print_error "Usage: spark-monitor-cli ports check <port> [proto]"
+        echo
+        echo "Check if a specific port is in use"
+        echo
+        echo "Arguments:"
+        echo "  port    Port number to check"
+        echo "  proto   Protocol: tcp, udp, or both (default: tcp)"
+        echo
+        echo "Examples:"
+        echo "  spark-monitor-cli ports check 9090"
+        echo "  spark-monitor-cli ports check 9090 udp"
+        echo
+        return 1
+    fi
+    
+    local port="$1"
+    local proto="${2:-tcp}"
+    
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        print_error "Invalid port number: $port"
+        return 1
+    fi
+    
+    if [[ "$proto" != "tcp" && "$proto" != "udp" && "$proto" != "both" ]]; then
+        print_error "Invalid protocol: $proto (must be tcp, udp, or both)"
+        return 1
+    fi
+    
+    local found=false
+    local proto_flag=""
+    case "$proto" in
+        tcp)  proto_flag="-tlnp" ;;
+        udp)  proto_flag="-ulnp" ;;
+        both) proto_flag="-tulnp" ;;
+    esac
+    
+    # Use sudo if available to get full process info
+    local ss_prefix=""
+    if command -v sudo &> /dev/null && sudo -n true 2>/dev/null; then
+        ss_prefix="sudo"
+    fi
+    
+    echo -e "${GREEN}=== Port Check ===${NC}"
+    echo "Checking port: $port ($proto)"
+    echo "-------------------------------"
+    
+    # Always use -tulnp for consistent column layout, then filter by proto
+    $ss_prefix ss -tulnp 2>/dev/null | tail -n +2 | awk -v target_port="$port" -v proto_filter="$proto" '
+    {
+        p = $1
+        local_addr = $5
+        pid = "-"
+        pname = "-"
+        for (i = 7; i <= NF; i++) {
+            if ($i ~ /users:/) {
+                rest = ""
+                for (j = i; j <= NF; j++) rest = rest " " $j
+                if (match(rest, /pid=([0-9]+)/, arr)) pid = arr[1]
+                if (match(rest, /users:\(\("([^"]+)"/, arr)) pname = arr[1]
+                break
+            }
+        }
+        n = split(local_addr, parts, ":")
+        port = parts[n]
+        gsub(/%.*/, "", port)
+        if (port == target_port && (proto_filter == "both" || proto_filter == p)) {
+            printf "  %-6s %-22s PID: %-8s Process: %s\n", p, local_addr, pid, pname
+        }
+    }'
+    
+    echo "-------------------------------"
+    if ss -tulnp 2>/dev/null | grep -q ":${port} "; then
+        print_warning "Port $port ($proto) is IN USE"
+    else
+        print_success "Port $port ($proto) is AVAILABLE"
+    fi
 }
 
 # Main script logic
