@@ -901,6 +901,7 @@ cmd_monitor() {
     trap 'print_error "Error during execution"; exit 1' ERR
 
     local prev_gen_tokens=""
+    local prev_prompt_tokens=""
 
     while true; do
         printf "\033[2J\033[H"
@@ -919,7 +920,11 @@ cmd_monitor() {
                 if [ $? -eq 0 ] && [ -n "$cpu_result" ]; then
                     local cpu_value
                     cpu_value=$(echo "$cpu_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                    printf "  CPU Usage: %.2f%%\n" "$cpu_value"
+                    if [[ "$cpu_value" != "N/A" ]] && [[ "$cpu_value" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                        printf "  CPU Usage: %.2f%%\n" "$cpu_value"
+                    else
+                        echo "  CPU Usage: N/A (invalid data)"
+                    fi
                 else
                     echo "  CPU Usage: N/A (query failed)"
                 fi
@@ -928,7 +933,11 @@ cmd_monitor() {
                 if [ $? -eq 0 ] && [ -n "$mem_result" ]; then
                     local mem_value
                     mem_value=$(echo "$mem_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                    printf "  Memory Usage: %.2f%%\n" "$mem_value"
+                    if [[ "$mem_value" != "N/A" ]] && [[ "$mem_value" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                        printf "  Memory Usage: %.2f%%\n" "$mem_value"
+                    else
+                        echo "  Memory Usage: N/A (invalid data)"
+                    fi
                 else
                     echo "  Memory Usage: N/A (query failed)"
                 fi
@@ -959,9 +968,21 @@ cmd_monitor() {
                     gpu_power=$(echo "$gpu_power_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                 fi
                 
-                printf "  GPU Utilization: %s%%\n" "$gpu_util"
-                printf "  GPU Temperature: %s°C\n" "$gpu_temp"
-                printf "  GPU Power Usage: %s W\n" "$gpu_power"
+                if [[ "$gpu_util" != "N/A" ]] && [[ "$gpu_util" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  GPU Utilization: %s%%\n" "$gpu_util"
+                else
+                    echo "  GPU Utilization: N/A"
+                fi
+                if [[ "$gpu_temp" != "N/A" ]] && [[ "$gpu_temp" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  GPU Temperature: %s°C\n" "$gpu_temp"
+                else
+                    echo "  GPU Temperature: N/A"
+                fi
+                if [[ "$gpu_power" != "N/A" ]] && [[ "$gpu_power" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  GPU Power Usage: %s W\n" "$gpu_power"
+                else
+                    echo "  GPU Power Usage: N/A"
+                fi
                 echo
                 ;;
         esac
@@ -994,31 +1015,70 @@ cmd_monitor() {
                     running=$(echo "$running_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                 fi
                 
-                 printf "  Generated Tokens: %s\n" "$gen_tokens"
-                 printf "  Prompt Tokens: %s\n" "$prompt_tokens"
-                 printf "  Waiting Requests: %s\n" "$pending"
-                 printf "  Running Requests: %s\n" "$running"
-                 
-                 local gen_tps prompt_tps
-                 gen_tps="N/A"
-                 prompt_tps="N/A"
-                 
-                 if [ -n "$gen_tokens_result" ] && [ -n "$prev_gen_tokens" ]; then
-                     local gen_diff=$((gen_tokens - prev_gen_tokens))
-                     gen_tps=$(awk "BEGIN {printf \"%.2f\", $gen_diff / $interval}")
-                 fi
-                 if [ -n "$prompt_tokens_result" ] && [ -n "$prev_prompt_tokens" ]; then
-                     local prompt_diff=$((prompt_tokens - prev_prompt_tokens))
-                     prompt_tps=$(awk "BEGIN {printf \"%.2f\", $prompt_diff / $interval}")
-                 fi
-                 
-                 printf "  Generation TPS: %s tokens/s\n" "$gen_tps"
-                 printf "  Prompt TPS: %s tokens/s\n" "$prompt_tps"
-                 echo
-                 
-                 prev_gen_tokens=$gen_tokens
-                 prev_prompt_tokens=$prompt_tokens
-                 ;;
+                # 检查是否有效数字
+                if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  Generated Tokens: %s\n" "$gen_tokens"
+                else
+                    echo "  Generated Tokens: N/A"
+                fi
+                if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  Prompt Tokens: %s\n" "$prompt_tokens"
+                else
+                    echo "  Prompt Tokens: N/A"
+                fi
+                if [[ "$pending" != "N/A" ]] && [[ "$pending" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  Waiting Requests: %s\n" "$pending"
+                else
+                    echo "  Waiting Requests: N/A"
+                fi
+                if [[ "$running" != "N/A" ]] && [[ "$running" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  Running Requests: %s\n" "$running"
+                else
+                    echo "  Running Requests: N/A"
+                fi
+                
+                local gen_tps prompt_tps
+                gen_tps="N/A"
+                prompt_tps="N/A"
+                
+                # 安全地计算TPS（每秒令牌数）
+                if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                   [[ "$prev_gen_tokens" != "N/A" ]] && [[ "$prev_gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    local gen_diff
+                    gen_diff=$(awk "BEGIN {print $gen_tokens - $prev_gen_tokens}")
+                    if [[ "$gen_diff" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                        gen_tps=$(awk "BEGIN {printf \"%.2f\", $gen_diff / $interval}")
+                    fi
+                fi
+                if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                   [[ "$prev_prompt_tokens" != "N/A" ]] && [[ "$prev_prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    local prompt_diff
+                    prompt_diff=$(awk "BEGIN {print $prompt_tokens - $prev_prompt_tokens}")
+                    if [[ "$prompt_diff" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                        prompt_tps=$(awk "BEGIN {printf \"%.2f\", $prompt_diff / $interval}")
+                    fi
+                fi
+                
+                if [[ "$gen_tps" != "N/A" ]] && [[ "$gen_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  Generation TPS: %s tokens/s\n" "$gen_tps"
+                else
+                    echo "  Generation TPS: N/A"
+                fi
+                if [[ "$prompt_tps" != "N/A" ]] && [[ "$prompt_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  Prompt TPS: %s tokens/s\n" "$prompt_tps"
+                else
+                    echo "  Prompt TPS: N/A"
+                fi
+                echo
+                
+                # 只在值是有效数字时更新历史值
+                if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    prev_gen_tokens=$gen_tokens
+                fi
+                if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    prev_prompt_tokens=$prompt_tokens
+                fi
+                ;;
         esac
 
         sleep "$interval"
