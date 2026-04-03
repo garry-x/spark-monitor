@@ -14,7 +14,7 @@ scrape_configs:
   # vLLM metrics
   - job_name: 'vllm'
     static_configs:
-      - targets: ['172.19.0.1:8000']  # Access host machine from container via host IP
+      - targets: ['host.docker.internal:8000']  # Access host machine's localhost
     metrics_path: /metrics
     scheme: http
 
