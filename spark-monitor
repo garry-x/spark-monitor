@@ -53,10 +53,16 @@ print_info() {
 
 # Check if running in installed mode
 is_installed_mode() {
-    local script_dir_name=$(basename "$SCRIPT_DIR")
-    if [[ "$script_dir_name" == "bin" ]] && [[ -d "$DEFAULT_CONFIG_DIR" ]]; then
+    # 如果配置目录存在且脚本不在项目目录中，则是安装模式
+    if [[ -d "$DEFAULT_CONFIG_DIR" ]] && [[ ! -f "$PROJECT_DIR/docker-compose.yml" ]]; then
         return 0
     fi
+    
+    # 如果配置目录存在且脚本路径与项目目录不同，也是安装模式
+    if [[ -d "$DEFAULT_CONFIG_DIR" ]] && [[ "$SCRIPT_DIR" != "$PROJECT_DIR" ]]; then
+        return 0
+    fi
+    
     return 1
 }
 
@@ -89,10 +95,28 @@ check_docker_compose() {
 # Check if we're in the project or config directory
 check_project_dir() {
     local config_dir=$(get_config_dir)
+    
     if [ ! -f "$config_dir/docker-compose.yml" ]; then
         print_error "docker-compose.yml not found. Please run this script from the project directory or ensure it's installed."
         exit 1
     fi
+}
+
+# Execute docker compose command in the correct directory
+docker_compose_exec() {
+    local config_dir=$(get_config_dir)
+    local old_cwd=$(pwd)
+    
+    cd "$config_dir" || {
+        print_error "Cannot change to config directory: $config_dir"
+        return 1
+    }
+    
+    docker compose "$@"
+    local result=$?
+    
+    cd "$old_cwd" || true
+    return $result
 }
 
 # Show status of all services
@@ -103,13 +127,13 @@ cmd_status() {
     print_header
     echo "Service Status:"
     echo "---------------"
-    docker compose ps
+    docker_compose_exec ps
     echo
     
     # Show container details
     echo "Detailed Container Information:"
     echo "-------------------------------"
-    docker compose ps --format "table {{.Name}}\t{{.State}}\t{{.Ports}}"
+    docker_compose_exec ps --format "table {{.Name}}\t{{.State}}\t{{.Ports}}"
     echo
 }
 
@@ -120,7 +144,7 @@ cmd_start() {
     
     print_header
     print_info "Starting Spark Monitor services..."
-    docker compose up -d
+    docker_compose_exec up -d
     
     # Wait a moment for services to start
     sleep 3
@@ -142,7 +166,7 @@ cmd_stop() {
     
     print_header
     print_info "Stopping Spark Monitor services..."
-    docker compose down
+    docker_compose_exec down
     print_success "Services stopped successfully!"
 }
 
@@ -153,7 +177,7 @@ cmd_restart() {
     
     print_header
     print_info "Restarting Spark Monitor services..."
-    docker compose restart
+    docker_compose_exec restart
     print_success "Services restarted successfully!"
 }
 
@@ -164,10 +188,10 @@ cmd_logs() {
     
     if [ "$#" -eq 0 ]; then
         # Show all logs
-        docker compose logs -f
+        docker_compose_exec logs -f
     else
         # Show logs for specific service
-        docker compose logs -f "$@"
+        docker_compose_exec logs -f "$@"
     fi
 }
 
