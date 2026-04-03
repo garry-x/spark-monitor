@@ -97,12 +97,12 @@ cd spark-monitor
   make up
   
   # Method 2: Using CLI tool (recommended)
-  ./spark-monitor-cli start
+  ./spark-monitor start
 
 # Verify services started correctly
 ./scripts/health_check.sh
   # OR
-  ./spark-monitor-cli health
+  ./spark-monitor health
 ```
 
 ### 3. Access Dashboards

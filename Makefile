@@ -20,19 +20,19 @@ init: up
 
 # CLI tool commands
 cli-status:
-	./spark-monitor-cli status
+	./spark-monitor status
 
 cli-start:
-	./spark-monitor-cli start
+	./spark-monitor start
 
 cli-stop:
-	./spark-monitor-cli stop
+	./spark-monitor stop
 
 cli-restart:
-	./spark-monitor-cli restart
+	./spark-monitor restart
 
 cli-logs:
-	./spark-monitor-cli logs
+	./spark-monitor logs
 
 cli-health:
-	./spark-monitor-cli health
+	./spark-monitor health

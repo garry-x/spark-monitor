@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Spark Monitor CLI - Management tool for the DGXSpark monitoring system
-# Usage: spark-monitor-cli [command] [options]
+# Usage: spark-monitor [command] [options]
 
 set -e
 
@@ -89,8 +89,8 @@ cmd_start() {
     echo "  Prometheus: http://localhost:9090"
     echo "  Grafana: http://localhost:3000 (admin/admin)"
     echo
-    echo "Use 'spark-monitor-cli logs' to view logs"
-    echo "Use 'spark-monitor-cli status' to check service status"
+    echo "Use 'spark-monitor logs' to view logs"
+    echo "Use 'spark-monitor status' to check service status"
 }
 
 # Stop all services
@@ -153,7 +153,7 @@ urlencode() {
 # Show general help
 cmd_help() {
     print_header
-    echo "Usage: spark-monitor-cli [command] [options]"
+    echo "Usage: spark-monitor [command] [options]"
     echo
     echo "Commands:"
     echo "  status    Show status of all services"
@@ -168,12 +168,12 @@ cmd_help() {
     echo "  help      Show this help message"
     echo
     echo "Monitor Examples:"
-    echo "  spark-monitor-cli monitor           # All metrics, 5s refresh"
-    echo "  spark-monitor-cli monitor system    # System metrics only"
-    echo "  spark-monitor-cli monitor gpu       # GPU metrics only"
-    echo "  spark-monitor-cli monitor vllm      # vLLM metrics only"
-    echo "  spark-monitor-cli monitor -i 10     # 10s refresh"
-    echo "  spark-monitor-cli monitor vllm -i 3 # vLLM with 3s refresh"
+    echo "  spark-monitor monitor           # All metrics, 5s refresh"
+    echo "  spark-monitor monitor system    # System metrics only"
+    echo "  spark-monitor monitor gpu       # GPU metrics only"
+    echo "  spark-monitor monitor vllm      # vLLM metrics only"
+    echo "  spark-monitor monitor -i 10     # 10s refresh"
+    echo "  spark-monitor monitor vllm -i 3 # vLLM with 3s refresh"
     echo
 }
 
@@ -190,7 +190,7 @@ cmd_monitor() {
                 shift 2
                 ;;
             -h|--help)
-                echo "Usage: spark-monitor-cli monitor [category] [-i interval]"
+                echo "Usage: spark-monitor monitor [category] [-i interval]"
                 echo
                 echo "Show real-time metrics with category filtering"
                 echo
@@ -200,12 +200,12 @@ cmd_monitor() {
                 echo "  -h, --help        Show this help message"
                 echo
                 echo "Examples:"
-                echo "  spark-monitor-cli monitor           # All metrics, 5s refresh"
-                echo "  spark-monitor-cli monitor system    # System metrics only"
-                echo "  spark-monitor-cli monitor gpu       # GPU metrics only"
-                echo "  spark-monitor-cli monitor vllm      # vLLM metrics only"
-                echo "  spark-monitor-cli monitor -i 10     # 10s refresh"
-                echo "  spark-monitor-cli monitor vllm -i 3 # vLLM with 3s refresh"
+                echo "  spark-monitor monitor           # All metrics, 5s refresh"
+                echo "  spark-monitor monitor system    # System metrics only"
+                echo "  spark-monitor monitor gpu       # GPU metrics only"
+                echo "  spark-monitor monitor vllm      # vLLM metrics only"
+                echo "  spark-monitor monitor -i 10     # 10s refresh"
+                echo "  spark-monitor monitor vllm -i 3 # vLLM with 3s refresh"
                 echo
                 echo "vLLM Metrics include:"
                 echo "  - Generated Tokens / Prompt Tokens (cumulative counts)"
@@ -446,8 +446,8 @@ cmd_ports() {
                 shift
                 ;;
             -h|--help)
-                echo "Usage: spark-monitor-cli ports [options]"
-                echo "       spark-monitor-cli ports check <port> [proto]"
+                echo "Usage: spark-monitor ports [options]"
+                echo "       spark-monitor ports check <port> [proto]"
                 echo
                 echo "Show host listening ports and corresponding processes"
                 echo
@@ -461,12 +461,12 @@ cmd_ports() {
                 echo "  -h, --help          Show this help message"
                 echo
                 echo "Examples:"
-                echo "  spark-monitor-cli ports             # All listening ports"
-                echo "  spark-monitor-cli ports -t          # TCP only"
-                echo "  spark-monitor-cli ports -S          # With sudo (shows all PIDs)"
-                echo "  spark-monitor-cli ports -p 9090     # Filter by port 9090"
-                echo "  spark-monitor-cli ports -s pid      # Sort by PID"
-                echo "  spark-monitor-cli ports check 9090  # Check port 9090"
+                echo "  spark-monitor ports             # All listening ports"
+                echo "  spark-monitor ports -t          # TCP only"
+                echo "  spark-monitor ports -S          # With sudo (shows all PIDs)"
+                echo "  spark-monitor ports -p 9090     # Filter by port 9090"
+                echo "  spark-monitor ports -s pid      # Sort by PID"
+                echo "  spark-monitor ports check 9090  # Check port 9090"
                 echo
                 return 0
                 ;;
@@ -559,7 +559,7 @@ cmd_ports() {
 # Check if a specific port is in use
 cmd_ports_check() {
     if [[ $# -lt 1 ]]; then
-        print_error "Usage: spark-monitor-cli ports check <port> [proto]"
+        print_error "Usage: spark-monitor ports check <port> [proto]"
         echo
         echo "Check if a specific port is in use"
         echo
@@ -568,8 +568,8 @@ cmd_ports_check() {
         echo "  proto   Protocol: tcp, udp, or both (default: tcp)"
         echo
         echo "Examples:"
-        echo "  spark-monitor-cli ports check 9090"
-        echo "  spark-monitor-cli ports check 9090 udp"
+        echo "  spark-monitor ports check 9090"
+        echo "  spark-monitor ports check 9090 udp"
         echo
         return 1
     fi

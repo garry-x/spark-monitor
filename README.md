@@ -24,7 +24,7 @@ Based on open-source platforms like Prometheus and Grafana for web-based visuali
     ```
     OR
     ```bash
-    ./spark-monitor-cli start
+    ./spark-monitor start
     ```
 3. Access the services:
     - Prometheus: http://localhost:9090
@@ -35,7 +35,7 @@ Based on open-source platforms like Prometheus and Grafana for web-based visuali
     ```
     OR
     ```bash
-    ./spark-monitor-cli health
+    ./spark-monitor health
     ```
 
 ### Services

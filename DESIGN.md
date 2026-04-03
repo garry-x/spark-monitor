@@ -105,6 +105,6 @@ Use Prometheus conventions:
 - Grafana can handle multiple users and dashboards
 
 ## Management
-- CLI tool (`spark-monitor-cli`) for easy management of all services
+- CLI tool (`spark-monitor`) for easy management of all services
 - Provides start/stop/restart/status/logs/health commands
 - Simplifies deployment and operational tasks
