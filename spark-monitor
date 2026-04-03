@@ -9,6 +9,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 
+# Configuration directory for installed mode
+DEFAULT_CONFIG_DIR="$HOME/.config/spark-monitor"
+DEFAULT_BIN_DIR="$HOME/.local/bin"
+VERSION_FILE="$DEFAULT_CONFIG_DIR/VERSION"
+
+# Get project directory (either current dir or config dir based on installation state)
+get_project_dir() {
+    if is_installed_mode; then
+        echo "$DEFAULT_CONFIG_DIR"
+    else
+        echo "$PROJECT_DIR"
+    fi
+}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -37,6 +51,33 @@ print_info() {
     echo -e "${YELLOW}[INFO] $1${NC}"
 }
 
+# Check if running in installed mode
+is_installed_mode() {
+    local script_dir_name=$(basename "$SCRIPT_DIR")
+    if [[ "$script_dir_name" == "bin" ]] && [[ -d "$DEFAULT_CONFIG_DIR" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Get config directory (installed or project)
+get_config_dir() {
+    if is_installed_mode; then
+        echo "$DEFAULT_CONFIG_DIR"
+    else
+        echo "$PROJECT_DIR"
+    fi
+}
+
+# Get binary directory (installed or project)
+get_binary_dir() {
+    if is_installed_mode; then
+        echo "$DEFAULT_BIN_DIR"
+    else
+        echo "$SCRIPT_DIR"
+    fi
+}
+
 # Check if docker compose is available
 check_docker_compose() {
     if ! command -v docker compose &> /dev/null; then
@@ -45,10 +86,11 @@ check_docker_compose() {
     fi
 }
 
-# Check if we're in the project directory
+# Check if we're in the project or config directory
 check_project_dir() {
-    if [ ! -f "$COMPOSE_FILE" ]; then
-        print_error "docker-compose.yml not found. Please run this script from the project directory."
+    local config_dir=$(get_config_dir)
+    if [ ! -f "$config_dir/docker-compose.yml" ]; then
+        print_error "docker-compose.yml not found. Please run this script from the project directory or ensure it's installed."
         exit 1
     fi
 }
@@ -165,6 +207,24 @@ cmd_help() {
     echo "  ports     Show listening ports and processes"
     echo "            ports check PORT [proto] - Check if port is in use"
     echo "  monitor   Show real-time metrics (system|gpu|vllm|all) [-i interval]"
+    echo
+    echo "Installation Commands:"
+    echo "  install   Install CLI and copy config files to user directory"
+    echo "            install --force     Overwrite existing installation"
+    echo "            install --config-dir PATH  Custom config directory"
+    echo "            install --bin-dir PATH     Custom binary directory"
+    echo "  uninstall Uninstall CLI and/or configs"
+    echo "            uninstall --cli-only  Remove CLI only"
+    echo "            uninstall --configs   Remove CLI and configs"
+    echo "            uninstall --full      Remove everything"
+    echo "            uninstall --force     Skip confirmation prompts"
+    echo "  upgrade   Upgrade to latest version"
+    echo "            upgrade --skip-backup  Don't create backup"
+    echo "            upgrade --force        Force upgrade"
+    echo "  deps      Check/install dependencies"
+    echo "            deps --skip-install  Check only, don't install"
+    echo "            deps --check-only    Check only, no output"
+    echo "  verify    Verify installation status"
     echo "  help      Show this help message"
     echo
     echo "Monitor Examples:"
@@ -175,6 +235,597 @@ cmd_help() {
     echo "  spark-monitor monitor -i 10     # 10s refresh"
     echo "  spark-monitor monitor vllm -i 3 # vLLM with 3s refresh"
     echo
+    echo "Installation Examples:"
+    echo "  spark-monitor install           # Install with default settings"
+    echo "  spark-monitor verify            # Verify installation"
+    echo "  spark-monitor deps              # Check dependencies"
+    echo "  spark-monitor upgrade           # Upgrade to latest version"
+    echo
+}
+
+# Check dependencies
+cmd_deps() {
+    local skip_install=false
+    local check_only=false
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-install)
+                skip_install=true
+                shift
+                ;;
+            --check-only)
+                check_only=true
+                shift
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    print_header
+    echo "Dependency Check"
+    echo "----------------"
+    
+    local missing=()
+    local found=()
+    
+    # Check Docker
+    if command -v docker &> /dev/null; then
+        found+=("Docker")
+    else
+        missing+=("Docker")
+    fi
+    
+    # Check Docker Compose
+    if command -v docker compose &> /dev/null; then
+        found+=("Docker Compose")
+    else
+        missing+=("Docker Compose")
+    fi
+    
+    # Check curl
+    if command -v curl &> /dev/null; then
+        found+=("curl")
+    else
+        missing+=("curl")
+    fi
+    
+    # Check jq
+    if command -v jq &> /dev/null; then
+        found+=("jq")
+    else
+        missing+=("jq")
+    fi
+    
+    echo ""
+    echo "Installed:"
+    if [ ${#found[@]} -gt 0 ]; then
+        for dep in "${found[@]}"; do
+            echo "  ✓ $dep"
+        done
+    else
+        echo "  (none)"
+    fi
+    
+    echo ""
+    echo "Missing:"
+    if [ ${#missing[@]} -gt 0 ]; then
+        for dep in "${missing[@]}"; do
+            echo "  ✗ $dep"
+        done
+        
+        if [[ "$skip_install" != "true" ]] && [[ "$check_only" != "true" ]]; then
+            echo ""
+            echo "Attempting to install missing dependencies..."
+            for dep in "${missing[@]}"; do
+                if [[ "$dep" == "Docker" ]]; then
+                    echo "  Installing Docker..."
+                    if command -v apt-get &> /dev/null; then
+                        sudo apt-get update && sudo apt-get install -y docker.io docker-compose
+                    elif command -v dnf &> /dev/null; then
+                        sudo dnf install -y docker docker-compose
+                    elif command -v yum &> /dev/null; then
+                        sudo yum install -y docker docker-compose
+                    elif [[ "$OSTYPE" == "darwin"* ]]; then
+                        echo "  Please install Docker Desktop for macOS"
+                    else
+                        echo "  Please install Docker manually"
+                    fi
+                elif [[ "$dep" == "Docker Compose" ]]; then
+                    echo "  Installing Docker Compose..."
+                    if command -v apt-get &> /dev/null; then
+                        sudo apt-get install -y docker-compose
+                    elif command -v dnf &> /dev/null; then
+                        sudo dnf install -y docker-compose
+                    elif command -v yum &> /dev/null; then
+                        sudo yum install -y docker-compose
+                    elif [[ "$OSTYPE" == "darwin"* ]]; then
+                        echo "  Docker Compose is included in Docker Desktop"
+                    else
+                        echo "  Please install Docker Compose manually"
+                    fi
+                elif [[ "$dep" == "curl" ]]; then
+                    echo "  Installing curl..."
+                    if command -v apt-get &> /dev/null; then
+                        sudo apt-get install -y curl
+                    elif command -v dnf &> /dev/null; then
+                        sudo dnf install -y curl
+                    elif command -v yum &> /dev/null; then
+                        sudo yum install -y curl
+                    else
+                        echo "  Please install curl manually"
+                    fi
+                elif [[ "$dep" == "jq" ]]; then
+                    echo "  Installing jq..."
+                    if command -v apt-get &> /dev/null; then
+                        sudo apt-get install -y jq
+                    elif command -v dnf &> /dev/null; then
+                        sudo dnf install -y jq
+                    elif command -v yum &> /dev/null; then
+                        sudo yum install -y jq
+                    else
+                        echo "  Please install jq manually"
+                    fi
+                fi
+            done
+            print_success "Installation attempts complete"
+        fi
+    else
+        echo "  (none)"
+    fi
+}
+
+# Verify installation
+cmd_verify() {
+    print_header
+    echo "Installation Verification"
+    echo "-------------------------"
+    
+    local all_ok=true
+    
+    # Check binary location
+    echo "Checking binary location..."
+    if [[ -x "$DEFAULT_BIN_DIR/spark-monitor" ]]; then
+        echo "  ✓ Binary found at $DEFAULT_BIN_DIR/spark-monitor"
+    else
+        echo "  ✗ Binary not found at $DEFAULT_BIN_DIR/spark-monitor"
+        all_ok=false
+    fi
+    
+    # Check config directory
+    echo "Checking configuration directory..."
+    if [[ -d "$DEFAULT_CONFIG_DIR" ]]; then
+        echo "  ✓ Config directory exists at $DEFAULT_CONFIG_DIR"
+    else
+        echo "  ✗ Config directory not found at $DEFAULT_CONFIG_DIR"
+        all_ok=false
+    fi
+    
+    # Check required files
+    echo "Checking required files..."
+    local required_files=("docker-compose.yml" "prometheus.yml" "custom-dcgm-counters.csv")
+    for file in "${required_files[@]}"; do
+        if [[ -f "$DEFAULT_CONFIG_DIR/$file" ]]; then
+            echo "  ✓ $file"
+        else
+            echo "  ✗ $file (missing)"
+            all_ok=false
+        fi
+    done
+    
+    # Check dependencies
+    echo "Checking dependencies..."
+    if command -v docker &> /dev/null; then
+        echo "  ✓ Docker"
+    else
+        echo "  ✗ Docker (missing)"
+        all_ok=false
+    fi
+    
+    if command -v docker compose &> /dev/null; then
+        echo "  ✓ Docker Compose"
+    else
+        echo "  ✗ Docker Compose (missing)"
+        all_ok=false
+    fi
+    
+    if command -v curl &> /dev/null; then
+        echo "  ✓ curl"
+    else
+        echo "  ✗ curl (missing)"
+        all_ok=false
+    fi
+    
+    # Check PATH
+    echo "Checking PATH..."
+    if [[ ":$PATH:" == *":$DEFAULT_BIN_DIR:"* ]]; then
+        echo "  ✓ $DEFAULT_BIN_DIR is in PATH"
+    else
+        echo "  ⚠ $DEFAULT_BIN_DIR is not in PATH"
+        echo "    Add to PATH by running: export PATH=\"\$PATH:$DEFAULT_BIN_DIR\""
+        echo "    Or add to ~/.bashrc: echo 'export PATH=\"\$PATH:$DEFAULT_BIN_DIR\"' >> ~/.bashrc"
+    fi
+    
+    if $all_ok; then
+        print_success "All checks passed!"
+        return 0
+    else
+        print_error "Some checks failed. Run 'spark-monitor install' to fix."
+        return 1
+    fi
+}
+
+# Install CLI and configs
+cmd_install() {
+    local force=false
+    local config_dir="$DEFAULT_CONFIG_DIR"
+    local bin_dir="$DEFAULT_BIN_DIR"
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force)
+                force=true
+                shift
+                ;;
+            --config-dir)
+                config_dir="$2"
+                shift 2
+                ;;
+            --bin-dir)
+                bin_dir="$2"
+                shift 2
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    print_header
+    echo "Installation"
+    echo "------------"
+    
+    # Check if already installed
+    if [[ -f "$bin_dir/spark-monitor" ]]; then
+        if [[ "$force" != "true" ]]; then
+            print_warning "Already installed at $bin_dir/spark-monitor"
+            print_info "Use --force to overwrite"
+            return 1
+        else
+            print_info "Overwriting existing installation"
+            rm -f "$bin_dir/spark-monitor"
+        fi
+    fi
+    
+    # Check if config already exists
+    if [[ -d "$config_dir" ]] && [[ -f "$config_dir/docker-compose.yml" ]]; then
+        if [[ "$force" != "true" ]]; then
+            print_warning "Config directory already exists at $config_dir"
+            print_info "Use --force to overwrite"
+            return 1
+        else
+            print_info "Overwriting existing configuration"
+            rm -rf "$config_dir"
+        fi
+    fi
+    
+    # Create directories
+    print_info "Creating directories..."
+    mkdir -p "$bin_dir"
+    mkdir -p "$config_dir"
+    
+    # Copy binary
+    print_info "Installing binary..."
+    local source_dir=$(get_project_dir)
+    cp "$source_dir/spark-monitor" "$bin_dir/spark-monitor"
+    chmod +x "$bin_dir/spark-monitor"
+    
+    # Copy configuration files
+    print_info "Copying configuration files..."
+    cp "$source_dir/docker-compose.yml" "$config_dir/"
+    cp "$source_dir/prometheus.yml" "$config_dir/"
+    cp "$source_dir/custom-dcgm-counters.csv" "$config_dir/"
+    
+    # Copy directories
+    if [[ -d "$source_dir/grafana" ]]; then
+        cp -r "$source_dir/grafana" "$config_dir/"
+    fi
+    
+    if [[ -d "$source_dir/prometheus" ]]; then
+        cp -r "$source_dir/prometheus" "$config_dir/"
+    fi
+    
+    if [[ -d "$source_dir/exporters" ]]; then
+        cp -r "$source_dir/exporters" "$config_dir/"
+    fi
+    
+    if [[ -d "$source_dir/scripts" ]]; then
+        cp -r "$source_dir/scripts" "$config_dir/"
+    fi
+    
+    # Write version file
+    if [[ -f "$PROJECT_DIR/VERSION" ]]; then
+        cp "$PROJECT_DIR/VERSION" "$config_dir/"
+    else
+        echo "1.0.0" > "$config_dir/VERSION"
+    fi
+    
+    # Update docker-compose.yml to use absolute paths
+    print_info "Updating configuration paths..."
+    sed -i "s|\.\/prometheus\.yml|$config_dir\/prometheus.yml|g" "$config_dir/docker-compose.yml"
+    sed -i "s|./custom-dcgm-counters.csv|$config_dir/custom-dcgm-counters.csv|g" "$config_dir/docker-compose.yml"
+    
+    # Check if ~/.local/bin is in PATH
+    if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
+        print_warning "$bin_dir is not in your PATH"
+        echo ""
+        print_info "To add it, run:"
+        echo "  export PATH=\"\$PATH:$bin_dir\""
+        echo ""
+        print_info "Or add to ~/.bashrc:"
+        echo "  echo 'export PATH=\"\$PATH:$bin_dir\"' >> ~/.bashrc"
+        echo "  source ~/.bashrc"
+    fi
+    
+    print_success "Installation complete!"
+    echo ""
+    print_info "To verify, run: spark-monitor verify"
+    print_info "To start services, run: spark-monitor start"
+}
+
+# Uninstall CLI and configs
+cmd_uninstall() {
+    local mode="cli-only"  # cli-only, configs, full
+    local force=false
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --cli-only)
+                mode="cli-only"
+                shift
+                ;;
+            --configs)
+                mode="configs"
+                shift
+                ;;
+            --full)
+                mode="full"
+                shift
+                ;;
+            --force)
+                force=true
+                shift
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    # Interactive mode
+    if [[ "$force" != "true" ]]; then
+        print_header
+        echo "Uninstall Options:"
+        echo "1) CLI only (remove binary, keep configs and Docker)"
+        echo "2) CLI + configs (remove binary and config files)"
+        echo "3) Full removal (CLI, configs, and Docker)"
+        echo ""
+        
+        read -p "Enter choice [1-3]: " choice
+        
+        case "$choice" in
+            1) mode="cli-only" ;;
+            2) mode="configs" ;;
+            3) mode="full" ;;
+            *) 
+                print_error "Invalid choice"
+                return 1
+                ;;
+        esac
+    fi
+    
+    print_header
+    echo "Uninstall Process"
+    echo "-----------------"
+    echo "Mode: $mode"
+    
+    # Confirmation
+    if [[ "$force" != "true" ]]; then
+        read -p "Are you sure you want to uninstall? [y/N]: " confirm
+        if [[ "$confirm" != "y" ]] && [[ "$confirm" != "Y" ]]; then
+            print_info "Uninstall cancelled"
+            return 0
+        fi
+    fi
+    
+    case "$mode" in
+        cli-only)
+            print_info "Removing CLI binary..."
+            if [[ -f "$DEFAULT_BIN_DIR/spark-monitor" ]]; then
+                rm -f "$DEFAULT_BIN_DIR/spark-monitor"
+                print_success "Binary removed"
+            else
+                print_warning "Binary not found at $DEFAULT_BIN_DIR"
+            fi
+            echo ""
+            print_info "Configuration preserved at $DEFAULT_CONFIG_DIR"
+            echo "Docker containers remain running"
+            ;;
+            
+        configs)
+            print_info "Removing CLI binary..."
+            if [[ -f "$DEFAULT_BIN_DIR/spark-monitor" ]]; then
+                rm -f "$DEFAULT_BIN_DIR/spark-monitor"
+                print_success "Binary removed"
+            else
+                print_warning "Binary not found at $DEFAULT_BIN_DIR"
+            fi
+            
+            print_info "Removing configuration directory..."
+            if [[ -d "$DEFAULT_CONFIG_DIR" ]]; then
+                rm -rf "$DEFAULT_CONFIG_DIR"
+                print_success "Configuration removed"
+            else
+                print_warning "Config directory not found at $DEFAULT_CONFIG_DIR"
+            fi
+            
+            echo ""
+            print_info "Docker containers remain running"
+            ;;
+            
+        full)
+            print_info "Stopping Docker containers..."
+            local old_cwd=$(pwd)
+            if [[ -f "$DEFAULT_CONFIG_DIR/docker-compose.yml" ]]; then
+                cd "$DEFAULT_CONFIG_DIR"
+                docker compose down || true
+                cd "$old_cwd"
+            fi
+            
+            print_info "Removing CLI binary..."
+            if [[ -f "$DEFAULT_BIN_DIR/spark-monitor" ]]; then
+                rm -f "$DEFAULT_BIN_DIR/spark-monitor"
+                print_success "Binary removed"
+            else
+                print_warning "Binary not found at $DEFAULT_BIN_DIR"
+            fi
+            
+            print_info "Removing configuration directory..."
+            if [[ -d "$DEFAULT_CONFIG_DIR" ]]; then
+                rm -rf "$DEFAULT_CONFIG_DIR"
+                print_success "Configuration removed"
+            else
+                print_warning "Config directory not found at $DEFAULT_CONFIG_DIR"
+            fi
+            
+            print_info "Cleaning up Docker volumes..."
+            if [[ -f "$DEFAULT_CONFIG_DIR/docker-compose.yml" ]]; then
+                cd "$DEFAULT_CONFIG_DIR"
+                docker compose down -v || true
+                cd "$old_cwd"
+            fi
+            
+            print_success "Full uninstall complete"
+            ;;
+    esac
+}
+
+# Upgrade to latest version
+cmd_upgrade() {
+    local skip_backup=false
+    local force=false
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-backup)
+                skip_backup=true
+                shift
+                ;;
+            --force)
+                force=true
+                shift
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    print_header
+    echo "Upgrade Process"
+    echo "---------------"
+    
+    # Check if installed
+    if [[ ! -f "$DEFAULT_BIN_DIR/spark-monitor" ]]; then
+        print_error "Not installed. Run 'spark-monitor install' first."
+        return 1
+    fi
+    
+    if [[ ! -d "$DEFAULT_CONFIG_DIR" ]]; then
+        print_error "Configuration directory not found. Run 'spark-monitor install' first."
+        return 1
+    fi
+    
+    # Check for new version (mock for now - would check GitHub releases)
+    print_info "Checking for updates..."
+    
+    local current_version="1.0.0"
+    if [[ -f "$VERSION_FILE" ]]; then
+        current_version=$(cat "$VERSION_FILE")
+    fi
+    
+    # For now, use current directory's VERSION file as source
+    local latest_version="1.0.0"
+    if [[ -f "$PROJECT_DIR/VERSION" ]]; then
+        latest_version=$(cat "$PROJECT_DIR/VERSION")
+    fi
+    
+    if [[ "$current_version" == "$latest_version" ]]; then
+        print_info "Already at latest version ($current_version)"
+        return 0
+    fi
+    
+    print_info "Found new version: $latest_version"
+    
+    # Backup
+    if [[ "$skip_backup" != "true" ]]; then
+        print_info "Creating backup..."
+        local backup_dir="$DEFAULT_CONFIG_DIR/backup_$(date +%Y%m%d_%H%M%S)"
+        cp -r "$DEFAULT_CONFIG_DIR" "$backup_dir"
+        print_success "Backup created at $backup_dir"
+    fi
+    
+    # Update binary
+    print_info "Updating binary..."
+    local source_dir=$(get_project_dir)
+    cp "$source_dir/spark-monitor" "$DEFAULT_BIN_DIR/spark-monitor"
+    chmod +x "$DEFAULT_BIN_DIR/spark-monitor"
+    print_success "Binary updated"
+    
+    # Update configs
+    print_info "Updating configuration files..."
+    cp "$source_dir/docker-compose.yml" "$DEFAULT_CONFIG_DIR/"
+    cp "$source_dir/prometheus.yml" "$DEFAULT_CONFIG_DIR/"
+    cp "$source_dir/custom-dcgm-counters.csv" "$DEFAULT_CONFIG_DIR/"
+    
+    # Update docker-compose.yml paths
+    sed -i "s|\.\/prometheus\.yml|$DEFAULT_CONFIG_DIR\/prometheus.yml|g" "$DEFAULT_CONFIG_DIR/docker-compose.yml"
+    sed -i "s|\.\/custom-dcgm-counters\.csv|$DEFAULT_CONFIG_DIR\/custom-dcgm-counters.csv|g" "$DEFAULT_CONFIG_DIR/docker-compose.yml"
+    
+    # Update version file
+    if [[ -f "$source_dir/VERSION" ]]; then
+        cp "$source_dir/VERSION" "$VERSION_FILE"
+    else
+        echo "$latest_version" > "$VERSION_FILE"
+    fi
+    
+    # Copy new directories
+    if [[ -d "$source_dir/grafana" ]]; then
+        cp -r "$source_dir/grafana" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    fi
+    
+    if [[ -d "$source_dir/prometheus" ]]; then
+        cp -r "$source_dir/prometheus" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    fi
+    
+    if [[ -d "$source_dir/exporters" ]]; then
+        cp -r "$source_dir/exporters" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    fi
+    
+    if [[ -d "$PROJECT_DIR/scripts" ]]; then
+        cp -r "$PROJECT_DIR/scripts" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    fi
+    
+    print_success "Upgrade complete!"
+    echo ""
+    print_info "Current version: $latest_version"
+    print_info "To verify, run: spark-monitor verify"
 }
 
 # Show real-time metrics with category filtering
@@ -658,6 +1309,25 @@ case "$1" in
     monitor)
         shift
         cmd_monitor "$@"
+        ;;
+    install)
+        shift
+        cmd_install "$@"
+        ;;
+    uninstall)
+        shift
+        cmd_uninstall "$@"
+        ;;
+    upgrade)
+        shift
+        cmd_upgrade "$@"
+        ;;
+    deps)
+        shift
+        cmd_deps "$@"
+        ;;
+    verify)
+        cmd_verify
         ;;
     help|*)
         cmd_help

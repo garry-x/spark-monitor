@@ -1,4 +1,4 @@
-.PHONY: up down logs clean cli-status cli-start cli-stop cli-restart cli-logs cli-health
+.PHONY: up down logs clean cli-status cli-start cli-stop cli-restart cli-logs cli-health install uninstall upgrade deps verify
 
 up:
 	docker compose up -d
@@ -36,3 +36,19 @@ cli-logs:
 
 cli-health:
 	./spark-monitor health
+
+# Installation commands
+install:
+	./spark-monitor install
+
+uninstall:
+	./spark-monitor uninstall
+
+upgrade:
+	./spark-monitor upgrade
+
+deps:
+	./spark-monitor deps
+
+verify:
+	./spark-monitor verify
