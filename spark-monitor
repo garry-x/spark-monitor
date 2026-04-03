@@ -1122,11 +1122,11 @@ cmd_monitor() {
             "grafana:3000"
             "node_exporter:9100"
             "gpu_exporter:9400"
-            "vllm:8000"
         )
         
         all_healthy=true
         
+        # Check Docker services (accessible from localhost)
         for service in "${services[@]}"; do
             IFS=':' read -r name port <<< "$service"
             # Accept 200 (OK), 302 (redirect, e.g., Prometheus), 401 (unauthorized), 403 (forbidden)
@@ -1138,10 +1138,27 @@ cmd_monitor() {
             fi
         done
         
-        if $all_healthy; then
-            print_success "All services are healthy!"
+        # Special check for vLLM service (running on host)
+        print_info "Checking vLLM service (host service)..."
+        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/" 2>/dev/null | grep -q "200\|302\|401\|403\|404"; then
+            print_success "vLLM (:8000) is accessible"
         else
-            print_error "Some services are not responding correctly"
+            print_warning "vLLM (:8000) is not accessible (may not be running)"
+            # Don't mark as unhealthy since vLLM is optional
+        fi
+        
+        # Check vLLM metrics endpoint specifically
+        print_info "Checking vLLM metrics endpoint..."
+        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/metrics" 2>/dev/null | grep -q "200\|302\|401\|403"; then
+            print_success "vLLM metrics endpoint is accessible"
+        else
+            print_warning "vLLM metrics endpoint is not accessible"
+        fi
+        
+        if $all_healthy; then
+            print_success "All core services are healthy!"
+        else
+            print_error "Some core services are not responding correctly"
             exit 1
         fi
     }
