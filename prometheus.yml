@@ -14,7 +14,14 @@ scrape_configs:
   # vLLM metrics
   - job_name: 'vllm'
     static_configs:
-      - targets: ['host.docker.internal:8000']  # Access host machine's localhost
+      - targets: ['host.docker.internal:8000']
+    metrics_path: /metrics
+    scheme: http
+
+  # Llama metrics
+  - job_name: 'llama'
+    static_configs:
+      - targets: ['llama_exporter:8002']
     metrics_path: /metrics
     scheme: http
 

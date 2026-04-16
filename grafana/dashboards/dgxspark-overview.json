@@ -390,7 +390,7 @@
       "title": "vLLM Active Requests",
       "gridPos": {
         "x": 0,
-        "y": 56,
+        "y": 57,
         "w": 12,
         "h": 8
       },
@@ -416,8 +416,8 @@
       "type": "graph",
       "title": "vLLM Total Generation Tokens",
       "gridPos": {
-        "x": 0,
-        "y": 56,
+        "x": 12,
+        "y": 57,
         "w": 12,
         "h": 8
       },
@@ -444,7 +444,7 @@
       "title": "vLLM Total Prompt Tokens",
       "gridPos": {
         "x": 12,
-        "y": 56,
+        "y": 58,
         "w": 12,
         "h": 8
       },
@@ -459,6 +459,200 @@
       "linewidth": 2,
       "fill": 1,
       "description": "Total prompt tokens processed by vLLM (cumulative counter)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Llama Generation TPS",
+      "gridPos": {
+        "x": 0,
+        "y": 66,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "llama:generation_tokens_per_second",
+          "legendFormat": "Generation TPS",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Average generation throughput in tokens/second",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tps",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Llama Prompt TPS",
+      "gridPos": {
+        "x": 12,
+        "y": 66,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "llama:prompt_tokens_per_second",
+          "legendFormat": "Prompt TPS",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Average prompt throughput in tokens/second",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "tps",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Llama Processing Requests",
+      "gridPos": {
+        "x": 0,
+        "y": 74,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "llama:requests_processing",
+          "legendFormat": "Processing",
+          "refId": "A"
+        },
+        {
+          "expr": "llama:requests_deferred",
+          "legendFormat": "Deferred",
+          "refId": "B"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Number of requests being processed and deferred",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "requests",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Llama Total Generation Tokens",
+      "gridPos": {
+        "x": 12,
+        "y": 74,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "llama:generation_tokens_total",
+          "legendFormat": "Generation Tokens",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Total number of generation tokens predicted (cumulative counter)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Llama Total Prompt Tokens",
+      "gridPos": {
+        "x": 0,
+        "y": 82,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "llama:prompt_tokens_total",
+          "legendFormat": "Prompt Tokens",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Total number of prompt tokens processed (cumulative counter)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Llama Decode Calls",
+      "gridPos": {
+        "x": 12,
+        "y": 82,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "llama:n_decode_total",
+          "legendFormat": "Decode Calls",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Total number of llama_decode() calls",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Llama Service Status",
+      "gridPos": {
+        "x": 0,
+        "y": 90,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "llama:up",
+          "legendFormat": "Status",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Llama service availability (1=up, 0=down)",
       "fieldConfig": {
         "defaults": {
           "unit": "short",
