@@ -165,8 +165,18 @@ cmd_stop() {
     check_project_dir
     
     print_header
-    print_info "Stopping Spark Monitor services..."
-    docker_compose_exec down
+    
+    if [ "$#" -eq 0 ]; then
+        # No args: stop all compose services defined in docker-compose.yml
+        print_info "Stopping Spark Monitor services..."
+        docker_compose_exec down
+    else
+        # Stop specific services by name
+        local services=("$@")
+        print_info "Stopping specified services: ${services[*]}"
+        docker compose stop "${services[@]}"
+    fi
+    
     print_success "Services stopped successfully!"
 }
 
@@ -224,7 +234,7 @@ cmd_help() {
     echo "Commands:"
     echo "  status    Show status of all services"
     echo "  start     Start all services"
-    echo "  stop      Stop all services"
+    echo "  stop      Stop services (optional: service names...)"
     echo "  restart   Restart all services"
     echo "  logs      View logs (add service name for specific service logs)"
     echo "  health    Check health of all services"
@@ -1163,8 +1173,6 @@ cmd_monitor() {
                     prev_prompt_tokens=$prompt_tokens
                 fi
                 ;;
-        esac
-
         esac
 
         sleep "$interval"
