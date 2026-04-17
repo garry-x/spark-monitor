@@ -1002,7 +1002,7 @@ cmd_monitor() {
         
         local timestamp=$(date "+%H:%M:%S")
         echo -e "${GREEN}╔════════════════════════════════════════════════════╗${NC}"
-        echo -e "${GREEN}║   ⚡  Spark Monitor  -  $timestamp            ║${NC}"
+        echo -e "${GREEN}║       Spark Monitor  -  $timestamp              ║${NC}"
         echo -e "${GREEN}╚════════════════════════════════════════════════════╝${NC}"
         echo "  Category: $category | Refresh: ${interval}s | Ctrl+C to exit"
         echo
