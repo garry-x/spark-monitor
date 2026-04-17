@@ -1032,17 +1032,19 @@ cmd_monitor() {
         case "$category" in
             vllm|all)
                 echo -e "${YELLOW}[vLLM]${NC}"
-                local gen_tokens_result prompt_tokens_result pending_result running_result
+                local gen_tokens_result prompt_tokens_result pending_result running_result model_name_result
                 gen_tokens_result=$(query_prometheus 'vllm:generation_tokens_total')
                 prompt_tokens_result=$(query_prometheus 'vllm:prompt_tokens_total')
                 pending_result=$(query_prometheus 'vllm:num_requests_waiting')
                 running_result=$(query_prometheus 'vllm:num_requests_running')
+                model_name_result=$(query_prometheus 'vllm:num_requests_running')
                 
-                local gen_tokens prompt_tokens pending running
+                local gen_tokens prompt_tokens pending running model_name
                 gen_tokens="N/A"
                 prompt_tokens="N/A"
                 pending="N/A"
                 running="N/A"
+                model_name="N/A"
                 
                 if [ -n "$gen_tokens_result" ]; then
                     gen_tokens=$(echo "$gen_tokens_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
@@ -1055,6 +1057,16 @@ cmd_monitor() {
                 fi
                 if [ -n "$running_result" ]; then
                     running=$(echo "$running_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$model_name_result" ]; then
+                    model_name=$(echo "$model_name_result" | jq -r '.data.result[0].metric.model_name // "N/A"' 2>/dev/null)
+                fi
+                
+                # 显示模型名
+                if [[ "$model_name" != "N/A" ]]; then
+                    echo -e "  Model: ${GREEN}$model_name${NC}"
+                else
+                    echo "  Model: N/A"
                 fi
                 
                 # 检查是否有效数字
