@@ -1297,53 +1297,52 @@ cmd_health() {
     check_project_dir
     
     print_header
-        print_info "Performing health checks..."
-        
-        # Check if services are accessible
-        local services=(
-            "prometheus:9090"
-            "grafana:3000"
-            "node_exporter:9100"
-            "gpu_exporter:9400"
-        )
-        
-        all_healthy=true
-        
-        # Check Docker services (accessible from localhost)
-        for service in "${services[@]}"; do
-            IFS=':' read -r name port <<< "$service"
-            # Accept 200 (OK), 302 (redirect, e.g., Prometheus), 401 (unauthorized), 403 (forbidden)
-            if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null | grep -q "200\|302\|401\|403"; then
-                print_success "$name (:$port) is accessible"
-            else
-                print_error "$name (:$port) is not accessible"
-                all_healthy=false
-            fi
-        done
-        
-        # Special check for vLLM service (running on host)
-        print_info "Checking vLLM service (host service)..."
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/" 2>/dev/null | grep -q "200\|302\|401\|403\|404"; then
-            print_success "vLLM (:8000) is accessible"
+    print_info "Performing health checks..."
+    
+    # Check if services are accessible
+    local services=(
+        "prometheus:9090"
+        "grafana:3000"
+        "node_exporter:9100"
+        "gpu_exporter:9400"
+    )
+    
+    all_healthy=true
+    
+    # Check Docker services (accessible from localhost)
+    for service in "${services[@]}"; do
+        IFS=':' read -r name port <<< "$service"
+        # Accept 200 (OK), 302 (redirect, e.g., Prometheus), 401 (unauthorized), 403 (forbidden)
+        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${port}/" 2>/dev/null | grep -q "200\|302\|401\|403"; then
+            print_success "$name (:$port) is accessible"
         else
-            print_warning "vLLM (:8000) is not accessible (may not be running)"
-            # Don't mark as unhealthy since vLLM is optional
+            print_error "$name (:$port) is not accessible"
+            all_healthy=false
         fi
-        
-        # Check vLLM metrics endpoint specifically
-        print_info "Checking vLLM metrics endpoint..."
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/metrics" 2>/dev/null | grep -q "200\|302\|401\|403"; then
-            print_success "vLLM metrics endpoint is accessible"
-        else
-            print_warning "vLLM metrics endpoint is not accessible"
-        fi
-        
-        if $all_healthy; then
-            print_success "All core services are healthy!"
-        else
-            print_error "Some core services are not responding correctly"
-            exit 1
-        fi
+    done
+    
+    # Special check for vLLM service (running on host)
+    print_info "Checking vLLM service (host service)..."
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/" 2>/dev/null | grep -q "200\|302\|401\|403\|404"; then
+        print_success "vLLM (:8000) is accessible"
+    else
+        print_warning "vLLM (:8000) is not accessible (may not be running)"
+    fi
+    
+    # Check vLLM metrics endpoint specifically
+    print_info "Checking vLLM metrics endpoint..."
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000/metrics" 2>/dev/null | grep -q "200\|302\|401\|403"; then
+        print_success "vLLM metrics endpoint is accessible"
+    else
+        print_warning "vLLM metrics endpoint is not accessible"
+    fi
+    
+    if $all_healthy; then
+        print_success "All core services are healthy!"
+    else
+        print_error "Some core services are not responding correctly"
+        exit 1
+    fi
 }
 
 # Show listening ports and processes
