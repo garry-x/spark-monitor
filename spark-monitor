@@ -27,6 +27,9 @@ get_project_dir() {
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
 # Helper functions
@@ -945,30 +948,38 @@ cmd_monitor() {
     last_busy_time=$(date +%s)
     local is_idle=false
 
+    local prev_cpu=""
+    local prev_mem=""
+    local prev_gpu_util=""
+    local prev_gpu_power=""
+    
     while true; do
         printf "\033[2J\033[H"
         
-        local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-        echo -e "${GREEN}=== Spark Monitor Real-time Metrics ===${NC}"
-        echo "Timestamp: $timestamp"
-        echo "-------------------------------"
+        local timestamp=$(date "+%H:%M:%S")
+        echo -e "${GREEN}╔════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║     ⚡ Spark Monitor  -  $timestamp              ║${NC}"
+        echo -e "${GREEN}╚════════════════════════════════════════════════════╝${NC}"
+        echo "  Category: $category | Refresh: ${interval}s | Ctrl+C to exit"
         echo
 
         case "$category" in
             system|all)
-                echo -e "${YELLOW}[SYSTEM]${NC}"
+                echo -e "${CYAN}┌─────────────────────────────────────┐${NC}"
+                echo -e "${CYAN}│ SYSTEM                              │${NC}"
+                echo -e "${CYAN}└─────────────────────────────────────┘${NC}"
                 local cpu_result
                 cpu_result=$(query_prometheus '100 - avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100')
                 if [ $? -eq 0 ] && [ -n "$cpu_result" ]; then
                     local cpu_value
                     cpu_value=$(echo "$cpu_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                     if [[ "$cpu_value" != "N/A" ]] && [[ "$cpu_value" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        printf "  CPU Usage: %.2f%%\n" "$cpu_value"
+                        printf "  ├─ CPU Usage   : %6.2f%%\n" "$cpu_value"
                     else
-                        echo "  CPU Usage: N/A (invalid data)"
+                        echo "  ├─ CPU Usage   :    N/A"
                     fi
                 else
-                    echo "  CPU Usage: N/A (query failed)"
+                    echo "  ├─ CPU Usage   :    N/A"
                 fi
                 local mem_result
                 mem_result=$(query_prometheus '(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100')
@@ -976,12 +987,12 @@ cmd_monitor() {
                     local mem_value
                     mem_value=$(echo "$mem_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                     if [[ "$mem_value" != "N/A" ]] && [[ "$mem_value" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        printf "  Memory Usage: %.2f%%\n" "$mem_value"
+                        printf "  ├─ Memory Usage: %6.2f%%\n" "$mem_value"
                     else
-                        echo "  Memory Usage: N/A (invalid data)"
+                        echo "  ├─ Memory Usage:    N/A"
                     fi
                 else
-                    echo "  Memory Usage: N/A (query failed)"
+                        echo "  ├─ Memory Usage:    N/A"
                 fi
                 echo
                 ;;
@@ -989,7 +1000,9 @@ cmd_monitor() {
 
         case "$category" in
             gpu|all)
-                echo -e "${YELLOW}[GPU]${NC}"
+                echo -e "${CYAN}┌─────────────────────────────────────┐${NC}"
+                echo -e "${CYAN}│ GPU                                 │${NC}"
+                echo -e "${CYAN}└─────────────────────────────────────┘${NC}"
                 local gpu_util_result gpu_temp_result gpu_power_result
                 gpu_util_result=$(query_prometheus 'DCGM_FI_DEV_GPU_UTIL')
                 gpu_temp_result=$(query_prometheus 'DCGM_FI_DEV_GPU_TEMP')
@@ -1011,19 +1024,19 @@ cmd_monitor() {
                 fi
                 
                 if [[ "$gpu_util" != "N/A" ]] && [[ "$gpu_util" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  GPU Utilization: %s%%\n" "$gpu_util"
+                    printf "  ├─ GPU Util    : %6s%%\n" "$gpu_util"
                 else
-                    echo "  GPU Utilization: N/A"
+                    echo "  ├─ GPU Util    :    N/A"
                 fi
                 if [[ "$gpu_temp" != "N/A" ]] && [[ "$gpu_temp" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  GPU Temperature: %s°C\n" "$gpu_temp"
+                    printf "  ├─ Temperature : %6s°C\n" "$gpu_temp"
                 else
-                    echo "  GPU Temperature: N/A"
+                    echo "  ├─ Temperature :    N/A"
                 fi
                 if [[ "$gpu_power" != "N/A" ]] && [[ "$gpu_power" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  GPU Power Usage: %s W\n" "$gpu_power"
+                    printf "  ├─ Power       : %6s W\n" "$gpu_power"
                 else
-                    echo "  GPU Power Usage: N/A"
+                    echo "  ├─ Power       :    N/A"
                 fi
                 echo
                 ;;
@@ -1031,7 +1044,9 @@ cmd_monitor() {
 
         case "$category" in
             vllm|all)
-                echo -e "${YELLOW}[vLLM]${NC}"
+                echo -e "${PURPLE}┌─────────────────────────────────────┐${NC}"
+                echo -e "${PURPLE}│ vLLM                                │${NC}"
+                echo -e "${PURPLE}└─────────────────────────────────────┘${NC}"
                 local gen_tokens_result prompt_tokens_result pending_result running_result model_name_result
                 gen_tokens_result=$(query_prometheus 'vllm:generation_tokens_total')
                 prompt_tokens_result=$(query_prometheus 'vllm:prompt_tokens_total')
@@ -1071,22 +1086,22 @@ cmd_monitor() {
                 
                 # 检查是否有效数字
                 if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Generated Tokens: %s\n" "$gen_tokens"
+                    printf "  ├─ Generated   : %s\n" "$gen_tokens"
                 else
                     echo "  Generated Tokens: N/A"
                 fi
                 if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Prompt Tokens: %s\n" "$prompt_tokens"
+                    printf "  ├─ Prompt      : %s\n" "$prompt_tokens"
                 else
                     echo "  Prompt Tokens: N/A"
                 fi
                 if [[ "$pending" != "N/A" ]] && [[ "$pending" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Waiting Requests: %s\n" "$pending"
+                    printf "  ├─ Waiting     : %s\n" "$pending"
                 else
                     echo "  Waiting Requests: N/A"
                 fi
                 if [[ "$running" != "N/A" ]] && [[ "$running" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Running Requests: %s\n" "$running"
+                    printf "  ├─ Running     : %s\n" "$running"
                 else
                     echo "  Running Requests: N/A"
                 fi
@@ -1122,7 +1137,7 @@ cmd_monitor() {
                 fi
                 
                 if [[ "$gen_tps" != "N/A" ]] && [[ "$gen_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Generation TPS: %s tokens/s\n" "$gen_tps"
+                    printf "  ├─ Gen TPS     : %s tokens/s\n" "$gen_tps"
                     # 只在值非零时更新max (避免在N/A或0时更新)
                     local gen_tps_nonzero
                     gen_tps_nonzero=$(awk -v val="$gen_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
@@ -1130,10 +1145,10 @@ cmd_monitor() {
                         max_gen_tps=$(awk -v cur="$gen_tps" -v max="$max_gen_tps" 'BEGIN {print (cur > max) ? cur : max}')
                     fi
                 else
-                    echo "  Generation TPS: N/A"
+                    echo "  ├─ Gen TPS     :    N/A"
                 fi
                 if [[ "$prompt_tps" != "N/A" ]] && [[ "$prompt_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Prompt TPS: %s tokens/s\n" "$prompt_tps"
+                    printf "  ├─ Prompt TPS  : %s tokens/s\n" "$prompt_tps"
                     # 只在值非零时更新max (避免在N/A或0时更新)
                     local prompt_tps_nonzero
                     prompt_tps_nonzero=$(awk -v val="$prompt_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
@@ -1141,19 +1156,19 @@ cmd_monitor() {
                         max_prompt_tps=$(awk -v cur="$prompt_tps" -v max="$max_prompt_tps" 'BEGIN {print (cur > max) ? cur : max}')
                     fi
                 else
-                    echo "  Prompt TPS: N/A"
+                    echo "  ├─ Prompt TPS  :    N/A"
                 fi
                 
                 # 显示max TPS (只在有有效非零值时显示)
                 local max_gen_nonzero
                 max_gen_nonzero=$(awk -v val="$max_gen_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                 if [[ "$max_gen_nonzero" == "1" ]]; then
-                    printf "  Generation TPS (max): %.2f tokens/s\n" "$max_gen_tps"
+                    printf "  ├─ Gen TPS(max): %6.2f tokens/s\n" "$max_gen_tps"
                 fi
                 local max_prompt_nonzero
                 max_prompt_nonzero=$(awk -v val="$max_prompt_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                 if [[ "$max_prompt_nonzero" == "1" ]]; then
-                    printf "  Prompt TPS (max): %.2f tokens/s\n" "$max_prompt_tps"
+                    printf "  ├─ Prompt(max) : %6.2f tokens/s\n" "$max_prompt_tps"
                 fi
                 
                 # 计算Idle时长
@@ -1173,7 +1188,7 @@ cmd_monitor() {
                     idle_mins=$(((idle_seconds % 3600) / 60))
                     local idle_secs
                     idle_secs=$((idle_seconds % 60))
-                    printf "  Idle Time: %02d:%02d:%02d\n" "$idle_hours" "$idle_mins" "$idle_secs"
+                    printf "  ├─ Idle Time   : %02d:%02d:%02d\n" "$idle_hours" "$idle_mins" "$idle_secs"
                 fi
                 echo
                 
