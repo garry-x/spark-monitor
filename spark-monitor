@@ -1344,7 +1344,7 @@ cmd_health() {
             print_error "Some core services are not responding correctly"
             exit 1
         fi
-    }
+}
 
 # Show listening ports and processes
 cmd_ports() {
