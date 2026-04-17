@@ -957,7 +957,7 @@ cmd_monitor() {
         
         local timestamp=$(date "+%H:%M:%S")
         echo -e "${GREEN}╔════════════════════════════════════════════════════╗${NC}"
-        echo -e "${GREEN}║     ⚡ Spark Monitor  -  $timestamp              ║${NC}"
+        echo -e "${GREEN}║   ⚡  Spark Monitor  -  $timestamp            ║${NC}"
         echo -e "${GREEN}╚════════════════════════════════════════════════════╝${NC}"
         echo "  Category: $category | Refresh: ${interval}s | Ctrl+C to exit"
         echo
@@ -973,12 +973,12 @@ cmd_monitor() {
                     local cpu_value
                     cpu_value=$(echo "$cpu_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                     if [[ "$cpu_value" != "N/A" ]] && [[ "$cpu_value" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        printf "  ├─ CPU Usage   : %6.2f%%\n" "$cpu_value"
+                        printf "  ├─ CPU Usage        : %6.2f%%\n" "$cpu_value"
                     else
-                        echo "  ├─ CPU Usage   :    N/A"
+                        echo "  ├─ CPU Usage        :    N/A"
                     fi
                 else
-                    echo "  ├─ CPU Usage   :    N/A"
+                    echo "  ├─ CPU Usage        :    N/A"
                 fi
                 local mem_result
                 mem_result=$(query_prometheus '(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100')
@@ -986,12 +986,12 @@ cmd_monitor() {
                     local mem_value
                     mem_value=$(echo "$mem_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                     if [[ "$mem_value" != "N/A" ]] && [[ "$mem_value" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        printf "  ├─ Memory Usage: %6.2f%%\n" "$mem_value"
+                        printf "  ├─ Memory Usage     : %6.2f%%\n" "$mem_value"
                     else
-                        echo "  ├─ Memory Usage:    N/A"
+                        echo "  ├─ Memory Usage     :    N/A"
                     fi
                 else
-                        echo "  ├─ Memory Usage:    N/A"
+                        echo "  ├─ Memory Usage     :    N/A"
                 fi
                 echo
                 ;;
@@ -1023,19 +1023,19 @@ cmd_monitor() {
                 fi
                 
                 if [[ "$gpu_util" != "N/A" ]] && [[ "$gpu_util" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ GPU Util    : %6s%%\n" "$gpu_util"
+                    printf "  ├─ GPU Utilization : %6s%%\n" "$gpu_util"
                 else
-                    echo "  ├─ GPU Util    :    N/A"
+                    echo "  ├─ GPU Utilization :    N/A"
                 fi
                 if [[ "$gpu_temp" != "N/A" ]] && [[ "$gpu_temp" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Temperature : %6s°C\n" "$gpu_temp"
+                    printf "  ├─ Temperature      : %6s°C\n" "$gpu_temp"
                 else
-                    echo "  ├─ Temperature :    N/A"
+                    echo "  ├─ Temperature      :    N/A"
                 fi
                 if [[ "$gpu_power" != "N/A" ]] && [[ "$gpu_power" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Power       : %6s W\n" "$gpu_power"
+                    printf "  ├─ Power Usage      : %6s W\n" "$gpu_power"
                 else
-                    echo "  ├─ Power       :    N/A"
+                    echo "  ├─ Power Usage      :    N/A"
                 fi
                 echo
                 ;;
@@ -1078,31 +1078,31 @@ cmd_monitor() {
                 
                 # 显示模型名
                 if [[ "$model_name" != "N/A" ]]; then
-                    printf "  ├─ Model      : ${GREEN}%s${NC}\n" "$model_name"
+                    printf "  ├─ Model Name        : ${GREEN}%s${NC}\n" "$model_name"
                 else
-                    echo "  ├─ Model      :    N/A"
+                    echo "  ├─ Model Name        :    N/A"
                 fi
                 
                 # 检查是否有效数字
                 if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Generated   : %s\n" "$gen_tokens"
+                    printf "  ├─ Generated Tokens  : %s\n" "$gen_tokens"
                 else
-                    echo "  Generated Tokens: N/A"
+                    echo "  ├─ Generated Tokens  :    N/A"
                 fi
                 if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Prompt      : %s\n" "$prompt_tokens"
+                    printf "  ├─ Prompt Tokens     : %s\n" "$prompt_tokens"
                 else
-                    echo "  Prompt Tokens: N/A"
+                    echo "  ├─ Prompt Tokens     :    N/A"
                 fi
                 if [[ "$pending" != "N/A" ]] && [[ "$pending" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Waiting     : %s\n" "$pending"
+                    printf "  ├─ Waiting Requests  : %s\n" "$pending"
                 else
-                    echo "  Waiting Requests: N/A"
+                    echo "  ├─ Waiting Requests  :    N/A"
                 fi
                 if [[ "$running" != "N/A" ]] && [[ "$running" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Running     : %s\n" "$running"
+                    printf "  ├─ Running Requests  : %s\n" "$running"
                 else
-                    echo "  Running Requests: N/A"
+                    echo "  ├─ Running Requests  :    N/A"
                 fi
                 
                 local gen_tps prompt_tps
@@ -1136,7 +1136,7 @@ cmd_monitor() {
                 fi
                 
                 if [[ "$gen_tps" != "N/A" ]] && [[ "$gen_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Gen TPS     : %s tokens/s\n" "$gen_tps"
+                    printf "  ├─ Generation TPS    : %s tokens/s\n" "$gen_tps"
                     # 只在值非零时更新max (避免在N/A或0时更新)
                     local gen_tps_nonzero
                     gen_tps_nonzero=$(awk -v val="$gen_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
@@ -1144,10 +1144,10 @@ cmd_monitor() {
                         max_gen_tps=$(awk -v cur="$gen_tps" -v max="$max_gen_tps" 'BEGIN {print (cur > max) ? cur : max}')
                     fi
                 else
-                    echo "  ├─ Gen TPS     :    N/A"
+                    echo "  ├─ Generation TPS    :    N/A"
                 fi
                 if [[ "$prompt_tps" != "N/A" ]] && [[ "$prompt_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Prompt TPS  : %s tokens/s\n" "$prompt_tps"
+                    printf "  ├─ Prompt TPS        : %s tokens/s\n" "$prompt_tps"
                     # 只在值非零时更新max (避免在N/A或0时更新)
                     local prompt_tps_nonzero
                     prompt_tps_nonzero=$(awk -v val="$prompt_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
@@ -1155,19 +1155,19 @@ cmd_monitor() {
                         max_prompt_tps=$(awk -v cur="$prompt_tps" -v max="$max_prompt_tps" 'BEGIN {print (cur > max) ? cur : max}')
                     fi
                 else
-                    echo "  ├─ Prompt TPS  :    N/A"
+                    echo "  ├─ Prompt TPS        :    N/A"
                 fi
                 
                 # 显示max TPS (只在有有效非零值时显示)
                 local max_gen_nonzero
                 max_gen_nonzero=$(awk -v val="$max_gen_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                 if [[ "$max_gen_nonzero" == "1" ]]; then
-                    printf "  ├─ Gen TPS(max): %6.2f tokens/s\n" "$max_gen_tps"
+                    printf "  ├─ Generation TPS(max): %6.2f tokens/s\n" "$max_gen_tps"
                 fi
                 local max_prompt_nonzero
                 max_prompt_nonzero=$(awk -v val="$max_prompt_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                 if [[ "$max_prompt_nonzero" == "1" ]]; then
-                    printf "  ├─ Prompt(max) : %6.2f tokens/s\n" "$max_prompt_tps"
+                    printf "  ├─ Prompt TPS(max)   : %6.2f tokens/s\n" "$max_prompt_tps"
                 fi
                 
                 # 计算Idle时长
@@ -1187,7 +1187,7 @@ cmd_monitor() {
                     idle_mins=$(((idle_seconds % 3600) / 60))
                     local idle_secs
                     idle_secs=$((idle_seconds % 60))
-                    printf "  ├─ Idle Time   : %02d:%02d:%02d\n" "$idle_hours" "$idle_mins" "$idle_secs"
+                    printf "  ├─ Idle Time         : %02d:%02d:%02d\n" "$idle_hours" "$idle_mins" "$idle_secs"
                 fi
                 echo
                 

@@ -15,6 +15,45 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Persistent state file for counter values
+STATE_FILE = os.path.expanduser('~/.config/spark-monitor/vllm_counter_state.json')
+
+def load_counter_state():
+    """Load persisted counter state from file"""
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load counter state: {e}")
+    return {'generation_tokens': 0, 'prompt_tokens': 0, 'last_effective_gen': 0, 'last_effective_prompt': 0}
+
+def save_counter_state(state):
+    """Save counter state to file"""
+    try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.warning(f"Failed to save counter state: {e}")
+
+def calculate_effective_counter(current_value, last_value, last_effective):
+    """
+    Calculate effective counter value, handling vLLM restart resets.
+    Returns the effective cumulative value.
+    """
+    current_value = float(current_value) if current_value else 0
+    
+    # If current value is less than last known value, vLLM likely restarted
+    if current_value < last_value:
+        # Add the previous effective value to the current counter
+        effective = current_value + last_effective
+    else:
+        # Normal case: continue from last effective value + increment
+        effective = last_effective + (current_value - last_value)
+    
+    return effective
+
 # Metrics
 VLLM_GENERATION_TOKENS_TOTAL = Counter('vllm:generation_tokens_total', 'Total number of generated tokens')
 VLLM_PROMPT_TOKENS_TOTAL = Counter('vllm:prompt_tokens_total', 'Total number of prompt tokens')
@@ -87,6 +126,10 @@ class VLLMExporter:
     
     def update_metrics(self):
         """Update all metrics from vLLM"""
+        counter_state = load_counter_state()
+        last_gen = counter_state.get('last_effective_gen', 0)
+        last_prompt = counter_state.get('last_effective_prompt', 0)
+        
         try:
             metrics_text = self.fetch_metrics()
             
@@ -94,12 +137,21 @@ class VLLMExporter:
                 VLLM_UP.set(1)
                 metrics = self.parse_prometheus_metrics(metrics_text)
                 
-                # Update metrics if found
                 if 'vllm:generation_tokens_total' in metrics:
-                    VLLM_GENERATION_TOKENS_TOTAL._value.set(metrics['vllm:generation_tokens_total'])
+                    current_gen = metrics['vllm:generation_tokens_total']
+                    effective_gen = calculate_effective_counter(current_gen, counter_state.get('generation_tokens', 0), last_gen)
+                    VLLM_GENERATION_TOKENS_TOTAL._value.set(effective_gen)
+                    counter_state['generation_tokens'] = current_gen
+                    counter_state['last_effective_gen'] = effective_gen
                     
                 if 'vllm:prompt_tokens_total' in metrics:
-                    VLLM_PROMPT_TOKENS_TOTAL._value.set(metrics['vllm:prompt_tokens_total'])
+                    current_prompt = metrics['vllm:prompt_tokens_total']
+                    effective_prompt = calculate_effective_counter(current_prompt, counter_state.get('prompt_tokens', 0), last_prompt)
+                    VLLM_PROMPT_TOKENS_TOTAL._value.set(effective_prompt)
+                    counter_state['prompt_tokens'] = current_prompt
+                    counter_state['last_effective_prompt'] = effective_prompt
+                
+                save_counter_state(counter_state)
                     
                 if 'vllm:num_requests_waiting' in metrics:
                     VLLM_NUM_REQUESTS_WAITING.set(metrics['vllm:num_requests_waiting'])

@@ -11,11 +11,17 @@ scrape_configs:
     static_configs:
       - targets: ['gpu_exporter:9400']
 
-  # vLLM metrics
+  # vLLM metrics (direct from vLLM for scheduler state)
   - job_name: 'vllm'
     static_configs:
       - targets: ['host.docker.internal:8000']
     metrics_path: /metrics
+    scheme: http
+
+  # vLLM exporter with persistent counters
+  - job_name: 'vllm_exporter'
+    static_configs:
+      - targets: ['vllm_exporter:8001']
     scheme: http
 
   - job_name: 'prometheus'

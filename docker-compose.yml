@@ -15,6 +15,25 @@ services:
       - '--collector.filesystem.ignored-mount-points=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/.+)[:]'
       - '--collector.filesystem.ignored-fs-types=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs)'
 
+  # vLLM metrics exporter with persistence
+  vllm_exporter:
+    image: python:3.9-slim
+    container_name: vllm_exporter
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./exporters:/app/exporters:ro
+      - vllm_exporter_data:/root/.config/spark-monitor
+    environment:
+      - VLLM_URL=http://host.docker.internal:8000
+      - EXPORTER_PORT=8001
+      - SCRAPE_INTERVAL=5
+    working_dir: /app
+    command: sh -c "pip install --no-cache-dir requests prometheus-client && python exporters/vllm_exporter.py"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
   # GPU metrics collector - NVIDIA DCGM Exporter
   gpu_exporter:
     image: nvidia/dcgm-exporter:4.5.2-4.8.1-distroless
@@ -65,3 +84,4 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  vllm_exporter_data:
