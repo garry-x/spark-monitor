@@ -1001,8 +1001,8 @@ cmd_monitor() {
         printf "\033[2J\033[H"
         
         local timestamp=$(date "+%H:%M:%S")
-        local left_pad=$(( (46 - 14 - 5 - 8) / 2 ))
-        local right_pad=$((46 - 14 - 5 - 8 - left_pad))
+        local left_pad=$(( (46 - 13 - 4 - 8) / 2 ))
+        local right_pad=$((46 - 13 - 4 - 8 - left_pad))
         printf "${GREEN}╔════════════════════════════════════════════════════╗${NC}\n"
         printf "${GREEN}║%${left_pad}sSpark Monitor  -  %s%${right_pad}s║${NC}\n" "" "$timestamp" ""
         printf "${GREEN}╚════════════════════════════════════════════════════╝${NC}\n"
@@ -1292,11 +1292,11 @@ cmd_monitor() {
     done
 }
 
-    # Health check endpoint verification
-    cmd_health() {
-        check_project_dir
-        
-        print_header
+# Health check endpoint verification
+cmd_health() {
+    check_project_dir
+    
+    print_header
         print_info "Performing health checks..."
         
         # Check if services are accessible
