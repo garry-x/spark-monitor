@@ -1001,8 +1001,10 @@ cmd_monitor() {
         printf "\033[2J\033[H"
         
         local timestamp=$(date "+%H:%M:%S")
+        local left_pad=$(( (46 - 14 - 5 - 8) / 2 ))
+        local right_pad=$((46 - 14 - 5 - 8 - left_pad))
         printf "${GREEN}╔════════════════════════════════════════════════════╗${NC}\n"
-        printf "${GREEN}║%18s%s  -  %s%18s║${NC}\n" "" "Spark Monitor" "$timestamp" ""
+        printf "${GREEN}║%${left_pad}sSpark Monitor  -  %s%${right_pad}s║${NC}\n" "" "$timestamp" ""
         printf "${GREEN}╚════════════════════════════════════════════════════╝${NC}\n"
         echo "  Category: $category | Refresh: ${interval}s | Ctrl+C to exit"
         echo
