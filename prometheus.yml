@@ -18,13 +18,6 @@ scrape_configs:
     metrics_path: /metrics
     scheme: http
 
-  # Llama metrics
-  - job_name: 'llama'
-    static_configs:
-      - targets: ['llama_exporter:8002']
-    metrics_path: /metrics
-    scheme: http
-
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']

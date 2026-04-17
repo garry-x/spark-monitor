@@ -230,7 +230,7 @@ cmd_help() {
     echo "  health    Check health of all services"
     echo "  ports     Show listening ports and processes"
     echo "            ports check PORT [proto] - Check if port is in use"
-    echo "  monitor   Show real-time metrics (system|gpu|vllm|llama|all) [-i interval]"
+    echo "  monitor   Show real-time metrics (system|gpu|vllm|all) [-i interval]"
     echo
     echo "Installation Commands:"
     echo "  install   Install CLI and copy config files to user directory"
@@ -879,7 +879,6 @@ cmd_monitor() {
                 echo "  spark-monitor monitor system    # System metrics only"
                 echo "  spark-monitor monitor gpu       # GPU metrics only"
     echo "  spark-monitor monitor vllm      # vLLM metrics only"
-    echo "  spark-monitor monitor llama      # Llama metrics only"
     echo "  spark-monitor monitor -i 10     # 10s refresh"
     echo "  spark-monitor monitor vllm -i 3 # vLLM with 3s refresh"
     echo
@@ -889,12 +888,6 @@ cmd_monitor() {
                 echo "  - Generation TPS / Prompt TPS (tokens per second)"
                 echo "  - Generation TPS max / Prompt TPS max (peak values, only update when non-zero)"
                 echo "  - Idle Time (HH:MM:SS, shown when pending=running=0)"
-                echo
-                echo "Llama Metrics include:"
-                echo "  - Generated Tokens / Prompt Tokens (cumulative counts)"
-                echo "  - Generation TPS / Prompt TPS (tokens per second)"
-                echo "  - Processing Requests / Deferred Requests"
-                echo "  - Decode Calls / Max Tokens"
                 echo
                 return 0
                 ;;
@@ -915,11 +908,11 @@ cmd_monitor() {
     fi
 
     case "$category" in
-        system|gpu|vllm|llama|all)
+        system|gpu|vllm|all)
             ;;
         *)
             print_error "Invalid category: $category"
-            echo "Valid categories: system, gpu, vllm, llama, all"
+            echo "Valid categories: system, gpu, vllm, all"
             return 1
             ;;
     esac
@@ -1172,103 +1165,6 @@ cmd_monitor() {
                 ;;
         esac
 
-        case "$category" in
-            llama|all)
-                echo -e "${YELLOW}[Llama]${NC}"
-                local llama_gen_tokens llama_prompt_tokens llama_gen_tps llama_prompt_tps
-                local llama_processing llama_deferred llama_n_decode llama_up
-                local llama_gen_tokens_result llama_prompt_tokens_result llama_gen_tps_result llama_prompt_tps_result
-                local llama_processing_result llama_deferred_result llama_n_decode_result llama_up_result
-                
-                llama_gen_tokens_result=$(query_prometheus 'llama:generation_tokens_total')
-                llama_prompt_tokens_result=$(query_prometheus 'llama:prompt_tokens_total')
-                llama_gen_tps_result=$(query_prometheus 'llama:generation_tokens_per_second')
-                llama_prompt_tps_result=$(query_prometheus 'llama:prompt_tokens_per_second')
-                llama_processing_result=$(query_prometheus 'llama:requests_processing')
-                llama_deferred_result=$(query_prometheus 'llama:requests_deferred')
-                llama_n_decode_result=$(query_prometheus 'llama:n_decode_total')
-                llama_up_result=$(query_prometheus 'llama:up')
-                
-                llama_gen_tokens="N/A"
-                llama_prompt_tokens="N/A"
-                llama_gen_tps="N/A"
-                llama_prompt_tps="N/A"
-                llama_processing="N/A"
-                llama_deferred="N/A"
-                llama_n_decode="N/A"
-                llama_up="N/A"
-                
-                if [ -n "$llama_gen_tokens_result" ]; then
-                    llama_gen_tokens=$(echo "$llama_gen_tokens_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                if [ -n "$llama_prompt_tokens_result" ]; then
-                    llama_prompt_tokens=$(echo "$llama_prompt_tokens_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                if [ -n "$llama_gen_tps_result" ]; then
-                    llama_gen_tps=$(echo "$llama_gen_tps_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                if [ -n "$llama_prompt_tps_result" ]; then
-                    llama_prompt_tps=$(echo "$llama_prompt_tps_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                if [ -n "$llama_processing_result" ]; then
-                    llama_processing=$(echo "$llama_processing_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                if [ -n "$llama_deferred_result" ]; then
-                    llama_deferred=$(echo "$llama_deferred_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                if [ -n "$llama_n_decode_result" ]; then
-                    llama_n_decode=$(echo "$llama_n_decode_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                if [ -n "$llama_up_result" ]; then
-                    llama_up=$(echo "$llama_up_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                fi
-                
-                if [[ "$llama_gen_tokens" != "N/A" ]] && [[ "$llama_gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Generation Tokens: %s\n" "$llama_gen_tokens"
-                else
-                    echo "  Generation Tokens: N/A"
-                fi
-                if [[ "$llama_prompt_tokens" != "N/A" ]] && [[ "$llama_prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Prompt Tokens: %s\n" "$llama_prompt_tokens"
-                else
-                    echo "  Prompt Tokens: N/A"
-                fi
-                if [[ "$llama_gen_tps" != "N/A" ]] && [[ "$llama_gen_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Generation TPS: %s tokens/s\n" "$llama_gen_tps"
-                else
-                    echo "  Generation TPS: N/A"
-                fi
-                if [[ "$llama_prompt_tps" != "N/A" ]] && [[ "$llama_prompt_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Prompt TPS: %s tokens/s\n" "$llama_prompt_tps"
-                else
-                    echo "  Prompt TPS: N/A"
-                fi
-                if [[ "$llama_processing" != "N/A" ]] && [[ "$llama_processing" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Processing Requests: %s\n" "$llama_processing"
-                else
-                    echo "  Processing Requests: N/A"
-                fi
-                if [[ "$llama_deferred" != "N/A" ]] && [[ "$llama_deferred" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Deferred Requests: %s\n" "$llama_deferred"
-                else
-                    echo "  Deferred Requests: N/A"
-                fi
-                if [[ "$llama_n_decode" != "N/A" ]] && [[ "$llama_n_decode" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  Decode Calls: %s\n" "$llama_n_decode"
-                else
-                    echo "  Decode Calls: N/A"
-                fi
-                if [[ "$llama_up" != "N/A" ]] && [[ "$llama_up" =~ ^[0-9]+$ ]]; then
-                    if [[ "$llama_up" == "1" ]]; then
-                        echo -e "  Service Status: ${GREEN}UP${NC}"
-                    else
-                        echo -e "  Service Status: ${RED}DOWN${NC}"
-                    fi
-                else
-                    echo "  Service Status: N/A"
-                fi
-                echo
-                ;;
         esac
 
         sleep "$interval"
@@ -1319,22 +1215,6 @@ cmd_monitor() {
             print_success "vLLM metrics endpoint is accessible"
         else
             print_warning "vLLM metrics endpoint is not accessible"
-        fi
-        
-        # Check Llama service (running on host port 9000)
-        print_info "Checking Llama service (host service)..."
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:9000/" 2>/dev/null | grep -q "200\|302\|401\|403\|404"; then
-            print_success "Llama (:9000) is accessible"
-        else
-            print_warning "Llama (:9000) is not accessible (may not be running)"
-        fi
-        
-        # Check llama_exporter metrics endpoint
-        print_info "Checking llama_exporter metrics endpoint..."
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:8002/metrics" 2>/dev/null | grep -q "200\|302\|401\|403"; then
-            print_success "llama_exporter (:8002) is accessible"
-        else
-            print_warning "llama_exporter (:8002) is not accessible"
         fi
         
         if $all_healthy; then

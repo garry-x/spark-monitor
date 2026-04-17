@@ -45,21 +45,6 @@ services:
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
 
-  # Llama metrics collector
-  llama_exporter:
-    build:
-      context: .
-      dockerfile: Dockerfile.llama_exporter
-    container_name: llama_exporter
-    ports:
-      - "8002:8002"
-    environment:
-      - LLAMA_URL=http://host.docker.internal:9000
-      - EXPORTER_PORT=8002
-      - SCRAPE_INTERVAL=5
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
   # Grafana
   grafana:
     image: docker.m.daocloud.io/grafana/grafana:latest
