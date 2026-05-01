@@ -17,19 +17,20 @@ services:
 
   # vLLM metrics exporter with persistence
   vllm_exporter:
-    image: python:3.9-slim
+    build:
+      context: .
+      dockerfile: Dockerfile.vllm_exporter
     container_name: vllm_exporter
     ports:
       - "8001:8001"
     volumes:
-      - ./exporters:/app/exporters:ro
       - vllm_exporter_data:/root/.config/spark-monitor
     environment:
       - VLLM_URL=http://host.docker.internal:8000
       - EXPORTER_PORT=8001
       - SCRAPE_INTERVAL=5
     working_dir: /app
-    command: sh -c "pip install --no-cache-dir requests prometheus-client && python exporters/vllm_exporter.py"
+    command: python exporters/vllm_exporter.py
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

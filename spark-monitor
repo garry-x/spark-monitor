@@ -273,6 +273,38 @@ urlencode() {
     echo "$encoded"
 }
 
+# Monitor state file for persistent per-model stats
+MONITOR_STATE_FILE="$HOME/.config/spark-monitor/monitor_state.json"
+
+monitor_state_init() {
+    mkdir -p "$(dirname "$MONITOR_STATE_FILE")"
+    if [[ ! -f "$MONITOR_STATE_FILE" ]]; then
+        echo '{}' > "$MONITOR_STATE_FILE"
+    fi
+}
+
+monitor_state_get() {
+    local model="$1"
+    local key="$2"
+    local default="${3:-null}"
+    jq -r --arg m "$model" --arg k "$key" --arg d "$default" \
+        'if .[$m] and (.[$m][$k] != null) then .[$m][$k] else $d end' "$MONITOR_STATE_FILE" 2>/dev/null
+}
+
+monitor_state_set() {
+    local model="$1"
+    local key="$2"
+    local value="$3"
+    local tmp_file="${MONITOR_STATE_FILE}.tmp"
+    jq --arg m "$model" --arg k "$key" --arg v "$value" \
+        '.[$m] = ((.[$m] // {}) + {($k): $v})' "$MONITOR_STATE_FILE" > "$tmp_file" 2>/dev/null
+    if [[ $? -eq 0 ]]; then
+        mv "$tmp_file" "$MONITOR_STATE_FILE"
+    else
+        rm -f "$tmp_file"
+    fi
+}
+
 # Show general help
 cmd_help() {
     print_header
@@ -620,8 +652,9 @@ cmd_install() {
         cp -r "$source_dir/prometheus" "$config_dir/"
     fi
     
-    if [[ -d "$source_dir/exporters" ]]; then
-        cp -r "$source_dir/exporters" "$config_dir/"
+    # Copy Dockerfile for vllm_exporter build
+    if [[ -f "$source_dir/Dockerfile.vllm_exporter" ]]; then
+        cp "$source_dir/Dockerfile.vllm_exporter" "$config_dir/"
     fi
     
     if [[ -d "$source_dir/scripts" ]]; then
@@ -895,8 +928,9 @@ cmd_upgrade() {
         cp -r "$source_dir/prometheus" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
     
-    if [[ -d "$source_dir/exporters" ]]; then
-        cp -r "$source_dir/exporters" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    # Copy Dockerfile for vllm_exporter build
+    if [[ -f "$source_dir/Dockerfile.vllm_exporter" ]]; then
+        cp "$source_dir/Dockerfile.vllm_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
     
     if [[ -d "$PROJECT_DIR/scripts" ]]; then
@@ -943,7 +977,8 @@ cmd_monitor() {
                 echo "  - Generated Tokens / Prompt Tokens (cumulative counts)"
                 echo "  - Waiting Requests / Running Requests (scheduler state)"
                 echo "  - Generation TPS / Prompt TPS (tokens per second)"
-                echo "  - Generation TPS max / Prompt TPS max (peak values, only update when non-zero)"
+                echo "  - TTFT avg / TTFT max (time to first token, persisted by model)"
+                echo "  - TPS max / TTFT max (peak values, persisted by model name)"
                 echo "  - Idle Time (HH:MM:SS, shown when pending=running=0)"
                 echo
                 return 0
@@ -980,17 +1015,22 @@ cmd_monitor() {
     echo "-------------------------------"
     echo
 
+    monitor_state_init
+
     trap 'echo; print_success "Monitoring stopped"; exit 0' INT
     trap 'print_error "Error during execution"; exit 1' ERR
 
     local prev_gen_tokens=""
     local prev_prompt_tokens=""
-    local max_gen_tps=0.00
-    local max_prompt_tps=0.00
+    local max_gen_tps="0.00"
+    local max_prompt_tps="0.00"
+    local max_ttft="0.00"
     local idle_seconds=0
     local last_busy_time
     last_busy_time=$(date +%s)
     local is_idle=false
+    local cur_model_name=""
+    local model_state_loaded=false
 
     local prev_cpu=""
     local prev_mem=""
@@ -1135,14 +1175,16 @@ cmd_monitor() {
                 pending_result=$(query_prometheus 'vllm:num_requests_waiting')
                 running_result=$(query_prometheus 'vllm:num_requests_running')
                 model_name_result=$(query_prometheus 'vllm:num_requests_running')
-                
+                local ttft_sum_result
+                ttft_sum_result=$(query_prometheus 'irate(vllm:time_to_first_token_seconds_sum[5m]) / (irate(vllm:time_to_first_token_seconds_count[5m]) > 0)')
+
                 local gen_tokens prompt_tokens pending running model_name
                 gen_tokens="N/A"
                 prompt_tokens="N/A"
                 pending="N/A"
                 running="N/A"
                 model_name="N/A"
-                
+
                 if [ -n "$gen_tokens_result" ]; then
                     gen_tokens=$(echo "$gen_tokens_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                 fi
@@ -1158,14 +1200,42 @@ cmd_monitor() {
                 if [ -n "$model_name_result" ]; then
                     model_name=$(echo "$model_name_result" | jq -r '.data.result[0].metric.model_name // "N/A"' 2>/dev/null)
                 fi
-                
+
+                # 模型切换时加载/保存状态
+                if [[ "$model_name" != "N/A" ]] && [[ "$model_name" != "$cur_model_name" ]]; then
+                    # 保存上一个模型的状态
+                    if [[ -n "$cur_model_name" ]]; then
+                        monitor_state_set "$cur_model_name" "prev_gen_tokens" "$prev_gen_tokens"
+                        monitor_state_set "$cur_model_name" "prev_prompt_tokens" "$prev_prompt_tokens"
+                        monitor_state_set "$cur_model_name" "max_gen_tps" "$max_gen_tps"
+                        monitor_state_set "$cur_model_name" "max_prompt_tps" "$max_prompt_tps"
+                        monitor_state_set "$cur_model_name" "max_ttft" "$max_ttft"
+                    fi
+                    # 加载新模型的状态
+                    prev_gen_tokens=$(monitor_state_get "$model_name" "prev_gen_tokens" "")
+                    prev_prompt_tokens=$(monitor_state_get "$model_name" "prev_prompt_tokens" "")
+                    max_gen_tps=$(monitor_state_get "$model_name" "max_gen_tps" "0.00")
+                    max_prompt_tps=$(monitor_state_get "$model_name" "max_prompt_tps" "0.00")
+                    max_ttft=$(monitor_state_get "$model_name" "max_ttft" "0.00")
+                    cur_model_name="$model_name"
+                fi
+
+                # Query TTFT: rate-based average from vLLM histogram
+                local ttft_avg="N/A"
+                if [ -n "$ttft_sum_result" ]; then
+                    ttft_avg=$(echo "$ttft_sum_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                    if [[ "$ttft_avg" == "N/A" ]] || [[ "$ttft_avg" == "" ]] || [[ "$ttft_avg" == "null" ]]; then
+                        ttft_avg="N/A"
+                    fi
+                fi
+
                 # 显示模型名
                 if [[ "$model_name" != "N/A" ]]; then
                     printf "  ├─ Model Name        : ${GREEN}%s${NC}\n" "$model_name"
                 else
                     echo "  ├─ Model Name        :    N/A"
                 fi
-                
+
                 # 检查是否有效数字
                 if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     local gen_tokens_formatted
@@ -1191,11 +1261,11 @@ cmd_monitor() {
                 else
                     echo "  ├─ Running Requests  :    N/A"
                 fi
-                
+
                 local gen_tps prompt_tps
                 gen_tps="N/A"
                 prompt_tps="N/A"
-                
+
                 # 安全地计算TPS（每秒令牌数）
                 if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]] && \
                    [[ "$prev_gen_tokens" != "N/A" ]] && [[ "$prev_gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
@@ -1213,7 +1283,7 @@ cmd_monitor() {
                         prompt_tps=$(awk "BEGIN {printf \"%.2f\", $prompt_diff / $interval}")
                     fi
                 fi
-                
+
                 # 检查vLLM是否Idle（pending=0且running=0，都是有效数字0）
                 is_idle=false
                 if [[ "$pending" != "N/A" ]] && [[ "$running" != "N/A" ]] && \
@@ -1221,10 +1291,9 @@ cmd_monitor() {
                    [[ "$pending" -eq 0 ]] && [[ "$running" -eq 0 ]]; then
                     is_idle=true
                 fi
-                
+
                 if [[ "$gen_tps" != "N/A" ]] && [[ "$gen_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     printf "  ├─ Generation TPS    : %s tokens/s\n" "$gen_tps"
-                    # 只在值非零时更新max (避免在N/A或0时更新)
                     local gen_tps_nonzero
                     gen_tps_nonzero=$(awk -v val="$gen_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                     if [[ "$gen_tps_nonzero" == "1" ]]; then
@@ -1235,7 +1304,6 @@ cmd_monitor() {
                 fi
                 if [[ "$prompt_tps" != "N/A" ]] && [[ "$prompt_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     printf "  ├─ Prompt TPS        : %s tokens/s\n" "$prompt_tps"
-                    # 只在值非零时更新max (避免在N/A或0时更新)
                     local prompt_tps_nonzero
                     prompt_tps_nonzero=$(awk -v val="$prompt_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                     if [[ "$prompt_tps_nonzero" == "1" ]]; then
@@ -1244,19 +1312,36 @@ cmd_monitor() {
                 else
                     echo "  ├─ Prompt TPS        :    N/A"
                 fi
-                
-                # 显示max TPS (只在有有效非零值时显示)
+
+                # TTFT display
+                if [[ "$ttft_avg" != "N/A" ]] && [[ "$ttft_avg" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    printf "  ├─ TTFT (avg)        : %ss\n" "$ttft_avg"
+                    local ttft_nonzero
+                    ttft_nonzero=$(awk -v val="$ttft_avg" 'BEGIN {print (val > 0) ? "1" : "0"}')
+                    if [[ "$ttft_nonzero" == "1" ]]; then
+                        max_ttft=$(awk -v cur="$ttft_avg" -v max="$max_ttft" 'BEGIN {print (cur > max) ? cur : max}')
+                    fi
+                else
+                    echo "  ├─ TTFT (avg)        :    N/A"
+                fi
+
+                # 显示max TPS 和 max TTFT (只在有有效非零值时显示)
                 local max_gen_nonzero
                 max_gen_nonzero=$(awk -v val="$max_gen_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                 if [[ "$max_gen_nonzero" == "1" ]]; then
-                    printf "  ├─ Generation TPS(max): %6.2f tokens/s\n" "$max_gen_tps"
+                    printf "  ├─ Gen TPS(max)      : %6.2f tokens/s\n" "$max_gen_tps"
                 fi
                 local max_prompt_nonzero
                 max_prompt_nonzero=$(awk -v val="$max_prompt_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
                 if [[ "$max_prompt_nonzero" == "1" ]]; then
                     printf "  ├─ Prompt TPS(max)   : %6.2f tokens/s\n" "$max_prompt_tps"
                 fi
-                
+                local max_ttft_nonzero
+                max_ttft_nonzero=$(awk -v val="$max_ttft" 'BEGIN {print (val > 0) ? "1" : "0"}')
+                if [[ "$max_ttft_nonzero" == "1" ]]; then
+                    printf "  ├─ TTFT(max)         : %6.3fs\n" "$max_ttft"
+                fi
+
                 # 计算Idle时长
                 if $is_idle; then
                     local current_time
@@ -1266,7 +1351,7 @@ cmd_monitor() {
                     last_busy_time=$(date +%s)
                     idle_seconds=0
                 fi
-                
+
                 if [[ "$idle_seconds" -gt 0 ]]; then
                     local idle_hours
                     idle_hours=$((idle_seconds / 3600))
@@ -1277,13 +1362,21 @@ cmd_monitor() {
                     printf "  ├─ Idle Time         : %02d:%02d:%02d\n" "$idle_hours" "$idle_mins" "$idle_secs"
                 fi
                 echo
-                
+
                 # 只在值是有效数字时更新历史值
                 if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     prev_gen_tokens=$gen_tokens
                 fi
                 if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     prev_prompt_tokens=$prompt_tokens
+                fi
+                # 持久化当前模型状态
+                if [[ -n "$cur_model_name" ]]; then
+                    monitor_state_set "$cur_model_name" "prev_gen_tokens" "$prev_gen_tokens"
+                    monitor_state_set "$cur_model_name" "prev_prompt_tokens" "$prev_prompt_tokens"
+                    monitor_state_set "$cur_model_name" "max_gen_tps" "$max_gen_tps"
+                    monitor_state_set "$cur_model_name" "max_prompt_tps" "$max_prompt_tps"
+                    monitor_state_set "$cur_model_name" "max_ttft" "$max_ttft"
                 fi
                 ;;
         esac
