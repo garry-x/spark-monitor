@@ -1017,19 +1017,31 @@ cmd_monitor() {
 
     monitor_state_init
 
-    trap 'echo; print_success "Monitoring stopped"; exit 0' INT
+    # 持久化当前监控状态（仅在退出/模型切换时调用）
+    _save_monitor_state() {
+        if [[ -n "${cur_model_name:-}" ]]; then
+            monitor_state_set "$cur_model_name" "prev_gen_tokens" "${prev_gen_tokens:-}"
+            monitor_state_set "$cur_model_name" "prev_prompt_tokens" "${prev_prompt_tokens:-}"
+            monitor_state_set "$cur_model_name" "max_gen_tps" "${max_gen_tps:-0.00}"
+            monitor_state_set "$cur_model_name" "max_prompt_tps" "${max_prompt_tps:-0.00}"
+            monitor_state_set "$cur_model_name" "max_ttft" "${max_ttft:-0.00}"
+        fi
+    }
+
+    trap '_save_monitor_state; echo; print_success "Monitoring stopped"; exit 0' INT TERM
+    trap '_save_monitor_state' EXIT
     trap 'print_error "Error during execution"; exit 1' ERR
 
-    local prev_gen_tokens=""
-    local prev_prompt_tokens=""
-    local max_gen_tps="0.00"
-    local max_prompt_tps="0.00"
-    local max_ttft="0.00"
+    prev_gen_tokens=""
+    prev_prompt_tokens=""
+    max_gen_tps="0.00"
+    max_prompt_tps="0.00"
+    max_ttft="0.00"
     local idle_seconds=0
     local last_busy_time
     last_busy_time=$(date +%s)
     local is_idle=false
-    local cur_model_name=""
+    cur_model_name=""
     local model_state_loaded=false
 
     local prev_cpu=""
@@ -1177,15 +1189,18 @@ cmd_monitor() {
                 pending_result=$(query_prometheus 'vllm:num_requests_waiting')
                 running_result=$(query_prometheus 'vllm:num_requests_running')
                 model_name_result=$(query_prometheus 'vllm:num_requests_running')
+                local kv_cache_result
+                kv_cache_result=$(query_prometheus 'vllm:kv_cache_usage_perc')
                 local ttft_sum_result
-                ttft_sum_result=$(query_prometheus 'irate(vllm:time_to_first_token_seconds_sum[5m]) / (irate(vllm:time_to_first_token_seconds_count[5m]) > 0)')
+                ttft_sum_result=$(query_prometheus 'rate(vllm:time_to_first_token_seconds_sum[5m]) / rate(vllm:time_to_first_token_seconds_count[5m])')
 
-                local gen_tokens prompt_tokens pending running model_name
+                local gen_tokens prompt_tokens pending running model_name kv_cache
                 gen_tokens="N/A"
                 prompt_tokens="N/A"
                 pending="N/A"
                 running="N/A"
                 model_name="N/A"
+                kv_cache="N/A"
 
                 if [ -n "$gen_tokens_result" ]; then
                     gen_tokens=$(echo "$gen_tokens_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
@@ -1201,6 +1216,9 @@ cmd_monitor() {
                 fi
                 if [ -n "$model_name_result" ]; then
                     model_name=$(echo "$model_name_result" | jq -r '.data.result[0].metric.model_name // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$kv_cache_result" ]; then
+                    kv_cache=$(echo "$kv_cache_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                 fi
 
                 # 模型切换时加载/保存状态
@@ -1220,6 +1238,8 @@ cmd_monitor() {
                     max_prompt_tps=$(monitor_state_get "$model_name" "max_prompt_tps" "0.00")
                     max_ttft=$(monitor_state_get "$model_name" "max_ttft" "0.00")
                     cur_model_name="$model_name"
+                    # 标记为跨session加载，首帧将prev对齐到当前值以避免TPS尖峰
+                    _first_iteration=true
                 fi
 
                 # Query TTFT: rate-based average from vLLM histogram
@@ -1263,26 +1283,56 @@ cmd_monitor() {
                 else
                     echo "  ├─ Running Requests  :    N/A"
                 fi
+                if [[ "$kv_cache" != "N/A" ]] && [[ "$kv_cache" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    local kv_cache_pct
+                    kv_cache_pct=$(awk "BEGIN {printf \"%.2f\", $kv_cache * 100}")
+                    local kv_bar
+                    kv_bar=$(gauge_bar "$kv_cache_pct" 100)
+                    printf "  ├─ KV Cache Usage    : %6s%% ${YELLOW}[%s]${NC}\n" "$kv_cache_pct" "$kv_bar"
+                else
+                    echo "  ├─ KV Cache Usage    :    N/A"
+                fi
 
                 local gen_tps prompt_tps
                 gen_tps="N/A"
                 prompt_tps="N/A"
+
+                # 首帧对齐：跨session加载后的第一个迭代，将prev同步到当前值以避免TPS尖峰
+                if [[ "${_first_iteration:-false}" == "true" ]]; then
+                    if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                        prev_gen_tokens=$gen_tokens
+                    fi
+                    if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                        prev_prompt_tokens=$prompt_tokens
+                    fi
+                    _first_iteration=false
+                fi
 
                 # 安全地计算TPS（每秒令牌数）
                 if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]] && \
                    [[ "$prev_gen_tokens" != "N/A" ]] && [[ "$prev_gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     local gen_diff
                     gen_diff=$(awk "BEGIN {print $gen_tokens - $prev_gen_tokens}")
-                    if [[ "$gen_diff" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        gen_tps=$(awk "BEGIN {printf \"%.2f\", $gen_diff / $interval}")
+                    if [[ "$gen_diff" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+                        # 检测计数器重置（vLLM重启），负diff表示counter归零
+                        if awk "BEGIN {exit ($gen_diff < 0) ? 0 : 1}"; then
+                            prev_gen_tokens=$gen_tokens
+                        else
+                            gen_tps=$(awk "BEGIN {printf \"%.2f\", $gen_diff / $interval}")
+                        fi
                     fi
                 fi
                 if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]] && \
                    [[ "$prev_prompt_tokens" != "N/A" ]] && [[ "$prev_prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     local prompt_diff
                     prompt_diff=$(awk "BEGIN {print $prompt_tokens - $prev_prompt_tokens}")
-                    if [[ "$prompt_diff" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        prompt_tps=$(awk "BEGIN {printf \"%.2f\", $prompt_diff / $interval}")
+                    if [[ "$prompt_diff" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+                        # 检测计数器重置（vLLM重启）
+                        if awk "BEGIN {exit ($prompt_diff < 0) ? 0 : 1}"; then
+                            prev_prompt_tokens=$prompt_tokens
+                        else
+                            prompt_tps=$(awk "BEGIN {printf \"%.2f\", $prompt_diff / $interval}")
+                        fi
                     fi
                 fi
 
@@ -1371,14 +1421,6 @@ cmd_monitor() {
                 fi
                 if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     prev_prompt_tokens=$prompt_tokens
-                fi
-                # 持久化当前模型状态
-                if [[ -n "$cur_model_name" ]]; then
-                    monitor_state_set "$cur_model_name" "prev_gen_tokens" "$prev_gen_tokens"
-                    monitor_state_set "$cur_model_name" "prev_prompt_tokens" "$prev_prompt_tokens"
-                    monitor_state_set "$cur_model_name" "max_gen_tps" "$max_gen_tps"
-                    monitor_state_set "$cur_model_name" "max_prompt_tps" "$max_prompt_tps"
-                    monitor_state_set "$cur_model_name" "max_ttft" "$max_ttft"
                 fi
                 ;;
         esac
