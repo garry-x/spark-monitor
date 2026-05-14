@@ -656,6 +656,16 @@ cmd_install() {
     if [[ -f "$source_dir/Dockerfile.vllm_exporter" ]]; then
         cp "$source_dir/Dockerfile.vllm_exporter" "$config_dir/"
     fi
+
+    # Copy Dockerfile for system_exporter build
+    if [[ -f "$source_dir/Dockerfile.system_exporter" ]]; then
+        cp "$source_dir/Dockerfile.system_exporter" "$config_dir/"
+    fi
+
+    # Copy exporters directory
+    if [[ -d "$source_dir/exporters" ]]; then
+        cp -r "$source_dir/exporters" "$config_dir/"
+    fi
     
     if [[ -d "$source_dir/scripts" ]]; then
         cp -r "$source_dir/scripts" "$config_dir/"
@@ -932,7 +942,17 @@ cmd_upgrade() {
     if [[ -f "$source_dir/Dockerfile.vllm_exporter" ]]; then
         cp "$source_dir/Dockerfile.vllm_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
-    
+
+    # Copy Dockerfile for system_exporter build
+    if [[ -f "$source_dir/Dockerfile.system_exporter" ]]; then
+        cp "$source_dir/Dockerfile.system_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    fi
+
+    # Copy exporters directory
+    if [[ -d "$source_dir/exporters" ]]; then
+        cp -r "$source_dir/exporters" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    fi
+
     if [[ -d "$PROJECT_DIR/scripts" ]]; then
         cp -r "$PROJECT_DIR/scripts" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
@@ -1173,6 +1193,25 @@ cmd_monitor() {
                     printf "  ├─ Power Usage      : %6s W\n" "$gpu_power"
                 else
                     echo "  ├─ Power Usage      :    N/A"
+                fi
+
+                # GPU Top Process Memory (Max)
+                local gpu_proc_result
+                gpu_proc_result=$(query_prometheus 'spark_monitor_gpu_process_memory_max_bytes')
+                if [ $? -eq 0 ] && [ -n "$gpu_proc_result" ]; then
+                    local proc_count
+                    proc_count=$(echo "$gpu_proc_result" | jq -r '.data.result | length' 2>/dev/null)
+                    if [[ -n "$proc_count" ]] && [[ "$proc_count" -gt 0 ]]; then
+                        echo "  └─ GPU Memory TOP ${proc_count} (Max):"
+                        local rank=0
+                        echo "$gpu_proc_result" | jq -r '.data.result | sort_by(.value[1] | tonumber) | reverse | to_entries | .[] | "\(.key+1)\t\(.value.metric.pid)\t\(.value.metric.process_name)\t\(.value.value[1])"' 2>/dev/null | while IFS=$'\t' read -r rnk pid pname mem_bytes; do
+                            if [[ -n "$rnk" ]]; then
+                                local mem_mb
+                                mem_mb=$(awk "BEGIN {printf \"%.0f\", $mem_bytes / 1048576}")
+                                printf "     %2s. %-24s %6s MiB (PID:%s)\n" "$rnk" "$pname" "$mem_mb" "$pid"
+                            fi
+                        done
+                    fi
                 fi
                 echo
                 ;;
@@ -1442,6 +1481,7 @@ cmd_health() {
         "grafana:3000"
         "node_exporter:9100"
         "gpu_exporter:9400"
+        "system_exporter:9106"
     )
     
     all_healthy=true

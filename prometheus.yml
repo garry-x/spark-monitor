@@ -24,6 +24,10 @@ scrape_configs:
       - targets: ['vllm_exporter:8001']
     scheme: http
 
+  - job_name: 'system_exporter'
+    static_configs:
+      - targets: ['system_exporter:9106']
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']

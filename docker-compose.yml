@@ -48,6 +48,29 @@ services:
     volumes:
       - ./custom-dcgm-counters.csv:/etc/dcgm-exporter/default-counters.csv:ro
 
+  # System metrics exporter (GPU process memory, etc.)
+  system_exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile.system_exporter
+    container_name: system_exporter
+    ports:
+      - "9106:9106"
+    environment:
+      - EXPORTER_PORT=9106
+      - SCRAPE_INTERVAL=15
+    command: python exporters/system_exporter.py
+    volumes:
+      - system_exporter_data:/root/.config/spark-monitor
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
   # Prometheus server
   prometheus:
     image: docker.m.daocloud.io/prom/prometheus:latest
@@ -86,3 +109,4 @@ volumes:
   prometheus_data:
   grafana_data:
   vllm_exporter_data:
+  system_exporter_data:
