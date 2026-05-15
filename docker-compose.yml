@@ -54,6 +54,7 @@ services:
       context: .
       dockerfile: Dockerfile.system_exporter
     container_name: system_exporter
+    pid: "host"
     ports:
       - "9106:9106"
     environment:

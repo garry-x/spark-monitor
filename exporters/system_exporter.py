@@ -71,64 +71,12 @@ def _save_max_state():
 
 
 def query_gpu_processes():
-    """Query NVML for per-process GPU memory usage across all GPUs.
-    Returns list of dicts with pid, name, memory_bytes, sorted by memory descending.
-    """
-    try:
-        from pynvml import (nvmlInit, nvmlShutdown, nvmlDeviceGetCount,
-                            nvmlDeviceGetHandleByIndex,
-                            nvmlDeviceGetComputeRunningProcesses,
-                            nvmlSystemGetProcessName)
-    except ImportError:
-        logger.warning("pynvml not installed, falling back to nvidia-smi")
-        return _query_gpu_processes_nvidia_smi()
-
-    try:
-        nvmlInit()
-    except Exception as e:
-        logger.warning(f"NVML init failed: {e}, falling back to nvidia-smi")
-        return _query_gpu_processes_nvidia_smi()
-
-    try:
-        process_map = {}  # pid -> accumulated memory_bytes + name
-
-        gpu_count = nvmlDeviceGetCount()
-        for gpu_idx in range(gpu_count):
-            handle = nvmlDeviceGetHandleByIndex(gpu_idx)
-            try:
-                procs = nvmlDeviceGetComputeRunningProcesses(handle)
-            except Exception:
-                continue
-
-            for proc in procs:
-                pid = str(proc.pid)
-                mem_bytes = proc.usedGpuMemory
-                if pid in process_map:
-                    process_map[pid]['memory_bytes'] += mem_bytes
-                else:
-                    try:
-                        name = nvmlSystemGetProcessName(proc.pid)
-                        if isinstance(name, bytes):
-                            name = name.decode('utf-8', errors='replace')
-                    except Exception:
-                        name = 'unknown'
-                    process_map[pid] = {
-                        'pid': pid,
-                        'name': name,
-                        'memory_bytes': mem_bytes,
-                    }
-
-        processes = list(process_map.values())
-        processes.sort(key=lambda x: x['memory_bytes'], reverse=True)
-        return processes
-    except Exception as e:
-        logger.warning(f"NVML query failed: {e}")
-        return []
-    finally:
-        try:
-            nvmlShutdown()
-        except Exception:
-            pass
+    """Query per-process GPU memory usage. Tries nvidia-smi first (works in containers),
+    falls back to pynvml."""
+    procs = _query_gpu_processes_nvidia_smi()
+    if procs:
+        return procs
+    return _query_gpu_processes_nvml()
 
 
 def _query_gpu_processes_nvidia_smi():
@@ -167,6 +115,64 @@ def _query_gpu_processes_nvidia_smi():
     except Exception as e:
         logger.warning(f"nvidia-smi query failed: {e}")
         return []
+
+
+def _query_gpu_processes_nvml():
+    """Fallback: query NVML for per-process GPU memory usage across all GPUs."""
+    try:
+        from pynvml import (nvmlInit, nvmlShutdown, nvmlDeviceGetCount,
+                            nvmlDeviceGetHandleByIndex,
+                            nvmlDeviceGetComputeRunningProcesses,
+                            nvmlSystemGetProcessName)
+    except ImportError:
+        logger.debug("pynvml not installed")
+        return []
+
+    try:
+        nvmlInit()
+    except Exception as e:
+        logger.warning(f"NVML init failed: {e}")
+        return []
+
+    try:
+        process_map = {}
+        gpu_count = nvmlDeviceGetCount()
+        for gpu_idx in range(gpu_count):
+            handle = nvmlDeviceGetHandleByIndex(gpu_idx)
+            try:
+                procs = nvmlDeviceGetComputeRunningProcesses(handle)
+            except Exception:
+                continue
+
+            for proc in procs:
+                pid = str(proc.pid)
+                mem_bytes = proc.usedGpuMemory
+                if pid in process_map:
+                    process_map[pid]['memory_bytes'] += mem_bytes
+                else:
+                    try:
+                        name = nvmlSystemGetProcessName(proc.pid)
+                        if isinstance(name, bytes):
+                            name = name.decode('utf-8', errors='replace')
+                    except Exception:
+                        name = 'unknown'
+                    process_map[pid] = {
+                        'pid': pid,
+                        'name': name,
+                        'memory_bytes': mem_bytes,
+                    }
+
+        processes = list(process_map.values())
+        processes.sort(key=lambda x: x['memory_bytes'], reverse=True)
+        return processes
+    except Exception as e:
+        logger.warning(f"NVML query failed: {e}")
+        return []
+    finally:
+        try:
+            nvmlShutdown()
+        except Exception:
+            pass
 
 
 def update_metrics():
