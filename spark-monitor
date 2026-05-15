@@ -1290,9 +1290,18 @@ cmd_monitor() {
                     fi
                 fi
 
-                # 显示模型名
+                # 显示模型名（从HF缓存路径提取短名）
+                local display_model_name="$model_name"
                 if [[ "$model_name" != "N/A" ]]; then
-                    printf "  ├─ Model Name        : ${GREEN}%s${NC}\n" "$model_name"
+                    # 处理 HuggingFace 缓存路径: .../models--org--model/snapshots/...
+                    if [[ "$model_name" == *"/models--"* ]]; then
+                        local extracted
+                        extracted=$(echo "$model_name" | sed 's|.*/models--||; s|/snapshots/.*||; s|--|/|g')
+                        if [[ -n "$extracted" ]]; then
+                            display_model_name="$extracted"
+                        fi
+                    fi
+                    printf "  ├─ Model Name        : ${GREEN}%s${NC}\n" "$display_model_name"
                 else
                     echo "  ├─ Model Name        :    N/A"
                 fi
