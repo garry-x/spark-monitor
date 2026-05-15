@@ -1042,6 +1042,8 @@ cmd_monitor() {
         if [[ -n "${cur_model_name:-}" ]]; then
             monitor_state_set "$cur_model_name" "prev_gen_tokens" "${prev_gen_tokens:-}"
             monitor_state_set "$cur_model_name" "prev_prompt_tokens" "${prev_prompt_tokens:-}"
+            monitor_state_set "$cur_model_name" "prev_ttft_sum" "${prev_ttft_sum:-}"
+            monitor_state_set "$cur_model_name" "prev_ttft_count" "${prev_ttft_count:-}"
             monitor_state_set "$cur_model_name" "max_gen_tps" "${max_gen_tps:-0.00}"
             monitor_state_set "$cur_model_name" "max_prompt_tps" "${max_prompt_tps:-0.00}"
             monitor_state_set "$cur_model_name" "max_ttft" "${max_ttft:-0.00}"
@@ -1054,6 +1056,8 @@ cmd_monitor() {
 
     prev_gen_tokens=""
     prev_prompt_tokens=""
+    prev_ttft_sum=""
+    prev_ttft_count=""
     max_gen_tps="0.00"
     max_prompt_tps="0.00"
     max_ttft="0.00"
@@ -1230,8 +1234,9 @@ cmd_monitor() {
                 model_name_result=$(query_prometheus 'vllm:num_requests_running')
                 local kv_cache_result
                 kv_cache_result=$(query_prometheus 'vllm:kv_cache_usage_perc')
-                local ttft_sum_result
-                ttft_sum_result=$(query_prometheus 'rate(vllm:time_to_first_token_seconds_sum[5m]) / rate(vllm:time_to_first_token_seconds_count[5m])')
+                local ttft_sum_result ttft_count_result
+                ttft_sum_result=$(query_prometheus 'vllm:time_to_first_token_seconds_sum')
+                ttft_count_result=$(query_prometheus 'vllm:time_to_first_token_seconds_count')
 
                 local gen_tokens prompt_tokens pending running model_name kv_cache
                 gen_tokens="N/A"
@@ -1266,6 +1271,8 @@ cmd_monitor() {
                     if [[ -n "$cur_model_name" ]]; then
                         monitor_state_set "$cur_model_name" "prev_gen_tokens" "$prev_gen_tokens"
                         monitor_state_set "$cur_model_name" "prev_prompt_tokens" "$prev_prompt_tokens"
+                        monitor_state_set "$cur_model_name" "prev_ttft_sum" "$prev_ttft_sum"
+                        monitor_state_set "$cur_model_name" "prev_ttft_count" "$prev_ttft_count"
                         monitor_state_set "$cur_model_name" "max_gen_tps" "$max_gen_tps"
                         monitor_state_set "$cur_model_name" "max_prompt_tps" "$max_prompt_tps"
                         monitor_state_set "$cur_model_name" "max_ttft" "$max_ttft"
@@ -1273,6 +1280,8 @@ cmd_monitor() {
                     # 加载新模型的状态
                     prev_gen_tokens=$(monitor_state_get "$model_name" "prev_gen_tokens" "")
                     prev_prompt_tokens=$(monitor_state_get "$model_name" "prev_prompt_tokens" "")
+                    prev_ttft_sum=$(monitor_state_get "$model_name" "prev_ttft_sum" "")
+                    prev_ttft_count=$(monitor_state_get "$model_name" "prev_ttft_count" "")
                     max_gen_tps=$(monitor_state_get "$model_name" "max_gen_tps" "0.00")
                     max_prompt_tps=$(monitor_state_get "$model_name" "max_prompt_tps" "0.00")
                     max_ttft=$(monitor_state_get "$model_name" "max_ttft" "0.00")
@@ -1281,12 +1290,40 @@ cmd_monitor() {
                     _first_iteration=true
                 fi
 
-                # Query TTFT: rate-based average from vLLM histogram
+                # Query TTFT: delta-based average from vLLM histogram
                 local ttft_avg="N/A"
+                local cur_ttft_sum cur_ttft_count
+                cur_ttft_sum="N/A"
+                cur_ttft_count="N/A"
+
                 if [ -n "$ttft_sum_result" ]; then
-                    ttft_avg=$(echo "$ttft_sum_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
-                    if [[ "$ttft_avg" == "N/A" ]] || [[ "$ttft_avg" == "" ]] || [[ "$ttft_avg" == "null" ]]; then
-                        ttft_avg="N/A"
+                    cur_ttft_sum=$(echo "$ttft_sum_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+                if [ -n "$ttft_count_result" ]; then
+                    cur_ttft_count=$(echo "$ttft_count_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
+                fi
+
+                # 首次对齐：仅当prev未从state加载时同步到当前值以避免TTFT尖峰
+                if [[ "$cur_ttft_sum" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                   [[ ! "$prev_ttft_sum" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    prev_ttft_sum=$cur_ttft_sum
+                fi
+                if [[ "$cur_ttft_count" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                   [[ ! "$prev_ttft_count" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    prev_ttft_count=$cur_ttft_count
+                fi
+
+                # 用delta计算平均TTFT
+                if [[ "$cur_ttft_sum" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                   [[ "$cur_ttft_count" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                   [[ "$prev_ttft_sum" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                   [[ "$prev_ttft_count" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    local sum_delta count_delta
+                    sum_delta=$(awk "BEGIN {print $cur_ttft_sum - $prev_ttft_sum}")
+                    count_delta=$(awk "BEGIN {print $cur_ttft_count - $prev_ttft_count}")
+                    if [[ "$count_delta" =~ ^[0-9]+\.?[0-9]*$ ]] && \
+                       awk "BEGIN {exit ($count_delta > 0) ? 0 : 1}"; then
+                        ttft_avg=$(awk "BEGIN {printf \"%.4f\", $sum_delta / $count_delta}")
                     fi
                 fi
 
@@ -1469,6 +1506,12 @@ cmd_monitor() {
                 fi
                 if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     prev_prompt_tokens=$prompt_tokens
+                fi
+                if [[ "$cur_ttft_sum" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    prev_ttft_sum=$cur_ttft_sum
+                fi
+                if [[ "$cur_ttft_count" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                    prev_ttft_count=$cur_ttft_count
                 fi
                 ;;
         esac
