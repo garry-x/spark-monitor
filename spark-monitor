@@ -319,6 +319,7 @@ cmd_help() {
     echo "  health    Check health of all services"
     echo "  ports     Show listening ports and processes"
     echo "            ports check PORT [proto] - Check if port is in use"
+	    echo "            ports pickone - Pick an unused port"
     echo "  monitor   Show real-time metrics (system|gpu|vllm|all) [-i interval]"
     echo
     echo "Installation Commands:"
@@ -1588,6 +1589,11 @@ cmd_ports() {
                 cmd_ports_check "$@"
                 return $?
                 ;;
+            pickone)
+                shift
+                cmd_ports_pickone "$@"
+                return $?
+                ;;
             -t|--tcp)
                 proto="tcp"
                 shift
@@ -1611,11 +1617,15 @@ cmd_ports() {
             -h|--help)
                 echo "Usage: spark-monitor ports [options]"
                 echo "       spark-monitor ports check <port> [proto]"
+                echo "       spark-monitor ports pickone [options]"
                 echo
                 echo "Show host listening ports and corresponding processes"
                 echo
-                echo "Options:"
+                echo "Subcommands:"
                 echo "  check PORT [proto]  Check if a port is in use (proto: tcp/udp/both)"
+                echo "  pickone             Pick an unused port"
+                echo
+                echo "Options:"
                 echo "  -t, --tcp           Show TCP only"
                 echo "  -u, --udp           Show UDP only"
                 echo "  -p, --port PORT     Filter by port number"
@@ -1624,12 +1634,14 @@ cmd_ports() {
                 echo "  -h, --help          Show this help message"
                 echo
                 echo "Examples:"
-                echo "  spark-monitor ports             # All listening ports"
-                echo "  spark-monitor ports -t          # TCP only"
-                echo "  spark-monitor ports -S          # With sudo (shows all PIDs)"
-                echo "  spark-monitor ports -p 9090     # Filter by port 9090"
-                echo "  spark-monitor ports -s pid      # Sort by PID"
-                echo "  spark-monitor ports check 9090  # Check port 9090"
+                echo "  spark-monitor ports               # All listening ports"
+                echo "  spark-monitor ports -t            # TCP only"
+                echo "  spark-monitor ports -S            # With sudo (shows all PIDs)"
+                echo "  spark-monitor ports -p 9090       # Filter by port 9090"
+                echo "  spark-monitor ports -s pid        # Sort by PID"
+                echo "  spark-monitor ports check 9090    # Check port 9090"
+                echo "  spark-monitor ports pickone       # Pick an unused port"
+                echo "  spark-monitor ports pickone -r 9100-9200  # Search within range"
                 echo
                 return 0
                 ;;
@@ -1791,6 +1803,101 @@ cmd_ports_check() {
         echo "-------------------------------"
         print_success "Port $port ($proto) is AVAILABLE"
     fi
+}
+
+# Pick an unused port
+cmd_ports_pickone() {
+    local range_start=9100
+    local range_end=9500
+    local proto="tcp"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -r|--range)
+                if [[ "$2" =~ ^[0-9]+-[0-9]+$ ]]; then
+                    range_start="${2%-*}"
+                    range_end="${2##*-}"
+                else
+                    print_error "Invalid range format: $2 (expected START-END, e.g. 9100-9200)"
+                    return 1
+                fi
+                shift 2
+                ;;
+            --proto)
+                if [[ "$2" != "tcp" && "$2" != "udp" && "$2" != "both" ]]; then
+                    print_error "Invalid protocol: $2 (must be tcp, udp, or both)"
+                    return 1
+                fi
+                proto="$2"
+                shift 2
+                ;;
+            -h|--help)
+                echo "Usage: spark-monitor ports pickone [options]"
+                echo
+                echo "Pick an unused port from a range, following exporter port conventions."
+                echo "Default range: 9100-9500 (Prometheus exporter convention)"
+                echo
+                echo "Options:"
+                echo "  -r, --range START-END  Port range to search (default: 9100-9500)"
+                echo "  --proto PROTO          Protocol: tcp, udp, or both (default: tcp)"
+                echo "  -h, --help             Show this help message"
+                echo
+                echo "Examples:"
+                echo "  spark-monitor ports pickone"
+                echo "  spark-monitor ports pickone -r 8000-8100"
+                echo "  spark-monitor ports pickone -r 9100-9200 --proto udp"
+                echo
+                return 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    if [[ $range_start -gt $range_end ]]; then
+        print_error "Invalid range: start ($range_start) > end ($range_end)"
+        return 1
+    fi
+
+    if [[ $range_start -lt 1 || $range_end -gt 65535 ]]; then
+        print_error "Port range out of bounds (1-65535): $range_start-$range_end"
+        return 1
+    fi
+
+    local ss_prefix=""
+    if command -v sudo &> /dev/null && sudo -n true 2>/dev/null; then
+        ss_prefix="sudo"
+    fi
+
+    # Collect all used ports in the range for the given protocol
+    local used_ports
+    used_ports=$($ss_prefix ss -tulnp 2>/dev/null | tail -n +2 | awk -v proto_filter="$proto" '
+    {
+        p = $1
+        local_addr = $5
+        n = split(local_addr, parts, ":")
+        port = parts[n]
+        gsub(/%.*/, "", port)
+        if (port ~ /^[0-9]+$/ && (proto_filter == "both" || proto_filter == p)) {
+            print port
+        }
+    }' | sort -n | uniq)
+
+    echo -e "${GREEN}=== Pick Unused Port ===${NC}"
+    echo "Searching range: $range_start-$range_end ($proto)"
+    echo "-------------------------------"
+
+    for ((port = range_start; port <= range_end; port++)); do
+        if ! echo "$used_ports" | grep -qx "$port"; then
+            print_success "Found unused port: $port"
+            return 0
+        fi
+    done
+
+    print_error "No unused port found in range $range_start-$range_end ($proto)"
+    return 1
 }
 
 # Main script logic
