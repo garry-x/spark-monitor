@@ -1641,7 +1641,7 @@ cmd_ports() {
                 echo "  spark-monitor ports -s pid        # Sort by PID"
                 echo "  spark-monitor ports check 9090    # Check port 9090"
                 echo "  spark-monitor ports pickone       # Pick an unused port"
-                echo "  spark-monitor ports pickone -r 9100-9200  # Search within range"
+                echo "  spark-monitor ports pickone -r 8000-9000   # Search within range"
                 echo
                 return 0
                 ;;
@@ -1807,8 +1807,8 @@ cmd_ports_check() {
 
 # Pick an unused port
 cmd_ports_pickone() {
-    local range_start=9100
-    local range_end=9500
+    local range_start=1024
+    local range_end=65535
     local proto="tcp"
 
     while [[ $# -gt 0 ]]; do
@@ -1818,7 +1818,7 @@ cmd_ports_pickone() {
                     range_start="${2%-*}"
                     range_end="${2##*-}"
                 else
-                    print_error "Invalid range format: $2 (expected START-END, e.g. 9100-9200)"
+                    print_error "Invalid range format: $2 (expected START-END, e.g. 8000-9000)"
                     return 1
                 fi
                 shift 2
@@ -1834,11 +1834,11 @@ cmd_ports_pickone() {
             -h|--help)
                 echo "Usage: spark-monitor ports pickone [options]"
                 echo
-                echo "Pick an unused port from a range, following exporter port conventions."
-                echo "Default range: 9100-9500 (Prometheus exporter convention)"
+                echo "Pick an unused port from a range."
+                echo "Default range: 1024-65535 (all non-privileged ports)"
                 echo
                 echo "Options:"
-                echo "  -r, --range START-END  Port range to search (default: 9100-9500)"
+                echo "  -r, --range START-END  Port range to search (default: 1024-65535)"
                 echo "  --proto PROTO          Protocol: tcp, udp, or both (default: tcp)"
                 echo "  -h, --help             Show this help message"
                 echo
