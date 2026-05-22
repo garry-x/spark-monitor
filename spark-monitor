@@ -1623,7 +1623,7 @@ cmd_ports() {
                 echo
                 echo "Subcommands:"
                 echo "  check PORT [proto]  Check if a port is in use (proto: tcp/udp/both)"
-                echo "  pickone             Pick an unused port"
+                echo "  pickone             Pick an unused port (default: 5000+ then 1024-4999)"
                 echo
                 echo "Options:"
                 echo "  -t, --tcp           Show TCP only"
@@ -1805,11 +1805,51 @@ cmd_ports_check() {
     fi
 }
 
+# Ports to avoid: common well-known service ports
+PORTS_BLACKLIST=(
+    20 21 22 23 25 53 67 68 69
+    80 110 111 123 135 137 138 139 143 161 162 389 443 445
+    514 515 548 587 636 873 993 995
+    1080 1194 1433 1521 1701 1723 1883 2049 2082 2083 2181
+    2375 2376 3000 3128 3260 3306 3389 3478 4000 4369
+    5000 5222 5349 5353 5432 5671 5672 5900 5984 6379
+    7000 7001 7077 7474 7687 8000 8001 8080 8086 8087 8088
+    8443 8888 9000 9042 9090 9092 9100 9160 9200 9300 9418
+    9999 11211 15672 27017 27018 27019 50000 50010 50070 50075
+)
+
+# Check if a port is in the blacklist
+_is_blacklisted() {
+    local p="$1"
+    for b in "${PORTS_BLACKLIST[@]}"; do
+        [[ "$p" == "$b" ]] && return 0
+    done
+    return 1
+}
+
+# Search a port range and print the first unused port (returns 0 if found)
+_search_ports() {
+    local start="$1" end="$2" proto="$3" used="$4"
+    local count=0
+    for ((port = start; port <= end; port++)); do
+        if echo "$used" | grep -qx "$port"; then
+            continue
+        fi
+        if _is_blacklisted "$port"; then
+            continue
+        fi
+        echo "$port"
+        return 0
+    done
+    return 1
+}
+
 # Pick an unused port
 cmd_ports_pickone() {
-    local range_start=1024
-    local range_end=65535
+    local range_start=""
+    local range_end=""
     local proto="tcp"
+    local explicit_range=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1817,6 +1857,7 @@ cmd_ports_pickone() {
                 if [[ "$2" =~ ^[0-9]+-[0-9]+$ ]]; then
                     range_start="${2%-*}"
                     range_end="${2##*-}"
+                    explicit_range=true
                 else
                     print_error "Invalid range format: $2 (expected START-END, e.g. 8000-9000)"
                     return 1
@@ -1834,11 +1875,12 @@ cmd_ports_pickone() {
             -h|--help)
                 echo "Usage: spark-monitor ports pickone [options]"
                 echo
-                echo "Pick an unused port from a range."
-                echo "Default range: 1024-65535 (all non-privileged ports)"
+                echo "Pick an unused port, avoiding common service ports."
+                echo "Default strategy: search from 5000 upward first,"
+                echo "then fall back to 1024-4999 if the upper range is exhausted."
                 echo
                 echo "Options:"
-                echo "  -r, --range START-END  Port range to search (default: 1024-65535)"
+                echo "  -r, --range START-END  Explicit port range (overrides tiered search)"
                 echo "  --proto PROTO          Protocol: tcp, udp, or both (default: tcp)"
                 echo "  -h, --help             Show this help message"
                 echo
@@ -1856,22 +1898,12 @@ cmd_ports_pickone() {
         esac
     done
 
-    if [[ $range_start -gt $range_end ]]; then
-        print_error "Invalid range: start ($range_start) > end ($range_end)"
-        return 1
-    fi
-
-    if [[ $range_start -lt 1 || $range_end -gt 65535 ]]; then
-        print_error "Port range out of bounds (1-65535): $range_start-$range_end"
-        return 1
-    fi
-
     local ss_prefix=""
     if command -v sudo &> /dev/null && sudo -n true 2>/dev/null; then
         ss_prefix="sudo"
     fi
 
-    # Collect all used ports in the range for the given protocol
+    # Collect all used ports for the given protocol
     local used_ports
     used_ports=$($ss_prefix ss -tulnp 2>/dev/null | tail -n +2 | awk -v proto_filter="$proto" '
     {
@@ -1886,17 +1918,47 @@ cmd_ports_pickone() {
     }' | sort -n | uniq)
 
     echo -e "${GREEN}=== Pick Unused Port ===${NC}"
-    echo "Searching range: $range_start-$range_end ($proto)"
-    echo "-------------------------------"
 
-    for ((port = range_start; port <= range_end; port++)); do
-        if ! echo "$used_ports" | grep -qx "$port"; then
-            print_success "Found unused port: $port"
+    local found=""
+
+    if $explicit_range; then
+        if [[ $range_start -gt $range_end ]]; then
+            print_error "Invalid range: start ($range_start) > end ($range_end)"
+            return 1
+        fi
+        if [[ $range_start -lt 1 || $range_end -gt 65535 ]]; then
+            print_error "Port range out of bounds (1-65535): $range_start-$range_end"
+            return 1
+        fi
+        echo "Searching range: $range_start-$range_end ($proto)"
+        echo "-------------------------------"
+        found=$(_search_ports "$range_start" "$range_end" "$proto" "$used_ports")
+        if [[ -n "$found" ]]; then
+            print_success "Found unused port: $found"
             return 0
         fi
-    done
+        print_error "No unused port found in range $range_start-$range_end ($proto)"
+        return 1
+    fi
 
-    print_error "No unused port found in range $range_start-$range_end ($proto)"
+    # Tiered search: upper range (5000-65535) first, then lower (1024-4999)
+    echo "Tier 1: searching 5000-65535 ($proto)"
+    echo "-------------------------------"
+    found=$(_search_ports 5000 65535 "$proto" "$used_ports")
+    if [[ -n "$found" ]]; then
+        print_success "Found unused port: $found"
+        return 0
+    fi
+
+    echo "Tier 1 exhausted, falling back to 1024-4999 ($proto)"
+    echo "-------------------------------"
+    found=$(_search_ports 1024 4999 "$proto" "$used_ports")
+    if [[ -n "$found" ]]; then
+        print_success "Found unused port: $found"
+        return 0
+    fi
+
+    print_error "No unused port found (all non-privileged ports in use)"
     return 1
 }
 
