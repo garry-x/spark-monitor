@@ -184,10 +184,8 @@ def update_metrics():
         current_procs = query_gpu_processes()
 
         # Update max tracker: bump max for each currently running PID
-        active_pids = set()
         for proc in current_procs:
             pid = proc['pid']
-            active_pids.add(pid)
             current_bytes = proc['memory_bytes']
             name = proc['name']
 
@@ -199,12 +197,10 @@ def update_metrics():
             else:
                 _max_tracker[pid] = {'name': name, 'max_bytes': current_bytes}
 
-        # Build list of (pid, name, max_bytes) sorted by max descending,
-        # include active PIDs only (clean up dead PIDs)
-        dead_pids = [p for p in _max_tracker if p not in active_pids]
-        for pid in dead_pids:
-            del _max_tracker[pid]
-
+        # Build list of (pid, name, max_bytes) sorted by max descending.
+        # Keep dead PIDs so their peak memory remains visible in Grafana/Prometheus
+        # even after the process exits. PID reuse is handled naturally: when a new
+        # process appears with the same PID, it updates the tracker entry.
         proc_list = [
             {'pid': pid, 'name': info['name'], 'memory_bytes': info['max_bytes']}
             for pid, info in _max_tracker.items()
