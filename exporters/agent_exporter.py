@@ -25,7 +25,7 @@ AGENT_TOKENS_TOTAL = Gauge(
 )
 AGENT_TOKENS_DAILY = Gauge(
     'spark_monitor_agent_tokens_daily',
-    'Tokens used per day by local AI agents (last 30 days retained)',
+    'Tokens used per day by local AI agents (last 7 days retained)',
     ['tool', 'model', 'date']
 )
 AGENT_UP = Gauge(
@@ -101,25 +101,25 @@ def collect_codex_tokens(db_path):
         cursor.execute("""
             SELECT model, SUM(tokens_used) as total
             FROM threads
-            WHERE tokens_used > 0
+            WHERE archived=0 AND tokens_used > 0
             GROUP BY model
         """)
         for row in cursor.fetchall():
             model = row['model'] or 'unknown'
             cumulative[model] = cumulative.get(model, 0) + (row['total'] or 0)
 
-        # Daily: sum tokens_used per model per day (last 30 days)
-        thirty_days_ago = (date.today() - timedelta(days=30)).isoformat()
+        # Daily: sum tokens_used per model per day (last 7 days)
+        seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
         cursor.execute("""
             SELECT model,
                    DATE(datetime(created_at, 'unixepoch')) as day,
                    SUM(tokens_used) as total
             FROM threads
-            WHERE tokens_used > 0
+            WHERE archived=0 AND tokens_used > 0
               AND day >= ?
             GROUP BY model, day
             ORDER BY day DESC
-        """, (thirty_days_ago,))
+        """, (seven_days_ago,))
         for row in cursor.fetchall():
             model = row['model'] or 'unknown'
             day = row['day']
