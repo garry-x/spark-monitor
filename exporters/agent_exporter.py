@@ -63,18 +63,18 @@ def collect_claude_tokens(stats_path):
         tokens_by_model = entry.get('tokensByModel', {})
 
         for model, tokens in tokens_by_model.items():
-            model = str(model)
-            tokens = int(tokens)
+            model_str = str(model)
+            tokens_int = int(tokens)
 
             # Cumulative
-            if model not in cumulative:
-                cumulative[model] = 0
-            cumulative[model] += tokens
+            if model_str not in cumulative:
+                cumulative[model_str] = 0
+            cumulative[model_str] += tokens_int
 
             # Daily
             if entry_date not in daily:
                 daily[entry_date] = {}
-            daily[entry_date][model] = daily[entry_date].get(model, 0) + tokens
+            daily[entry_date][model_str] = daily[entry_date].get(model_str, 0) + tokens_int
 
     return cumulative, daily
 
@@ -92,6 +92,7 @@ def collect_codex_tokens(db_path):
         logger.debug(f"Codex state DB not found: {db_path}")
         return cumulative, daily
 
+    conn = None
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
@@ -116,7 +117,7 @@ def collect_codex_tokens(db_path):
                    SUM(tokens_used) as total
             FROM threads
             WHERE archived=0 AND tokens_used > 0
-              AND day >= ?
+              AND DATE(datetime(created_at, 'unixepoch')) >= ?
             GROUP BY model, day
             ORDER BY day DESC
         """, (seven_days_ago,))
@@ -127,9 +128,14 @@ def collect_codex_tokens(db_path):
                 daily[day] = {}
             daily[day][model] = daily[day].get(model, 0) + (row['total'] or 0)
 
-        conn.close()
     except Exception as e:
         logger.warning(f"Failed to read Codex state DB: {e}")
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
 
     return cumulative, daily
 
