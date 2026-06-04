@@ -664,6 +664,11 @@ cmd_install() {
         cp "$source_dir/Dockerfile.system_exporter" "$config_dir/"
     fi
 
+    # Copy Dockerfile for agent_exporter build
+    if [[ -f "$source_dir/Dockerfile.agent_exporter" ]]; then
+        cp "$source_dir/Dockerfile.agent_exporter" "$config_dir/"
+    fi
+
     # Copy exporters directory
     if [[ -d "$source_dir/exporters" ]]; then
         cp -r "$source_dir/exporters" "$config_dir/"
@@ -948,6 +953,11 @@ cmd_upgrade() {
     # Copy Dockerfile for system_exporter build
     if [[ -f "$source_dir/Dockerfile.system_exporter" ]]; then
         cp "$source_dir/Dockerfile.system_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    fi
+
+    # Copy Dockerfile for agent_exporter build
+    if [[ -f "$source_dir/Dockerfile.agent_exporter" ]]; then
+        cp "$source_dir/Dockerfile.agent_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
 
     # Copy exporters directory
