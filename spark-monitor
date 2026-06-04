@@ -1391,47 +1391,21 @@ cmd_monitor() {
                     echo "  ├─ KV Cache Usage    :    N/A"
                 fi
 
+                # Use Prometheus rate() for accurate TPS independent of refresh interval
                 local gen_tps prompt_tps
+                local gen_tps_result prompt_tps_result
+
+                gen_tps_result=$(query_prometheus 'rate(vllm:generation_tokens_total{job="vllm_exporter"}[1m])')
+                prompt_tps_result=$(query_prometheus 'rate(vllm:prompt_tokens_total{job="vllm_exporter"}[1m])')
+
                 gen_tps="N/A"
                 prompt_tps="N/A"
 
-                # 首帧对齐：跨session加载后的第一个迭代，将prev同步到当前值以避免TPS尖峰
-                if [[ "${_first_iteration:-false}" == "true" ]]; then
-                    if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        prev_gen_tokens=$gen_tokens
-                    fi
-                    if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                        prev_prompt_tokens=$prompt_tokens
-                    fi
-                    _first_iteration=false
+                if [ -n "$gen_tps_result" ]; then
+                    gen_tps=$(echo "$gen_tps_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                 fi
-
-                # 安全地计算TPS（每秒令牌数）
-                if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]] && \
-                   [[ "$prev_gen_tokens" != "N/A" ]] && [[ "$prev_gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    local gen_diff
-                    gen_diff=$(awk "BEGIN {print $gen_tokens - $prev_gen_tokens}")
-                    if [[ "$gen_diff" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
-                        # 检测计数器重置（vLLM重启），负diff表示counter归零
-                        if awk "BEGIN {exit ($gen_diff < 0) ? 0 : 1}"; then
-                            prev_gen_tokens=$gen_tokens
-                        else
-                            gen_tps=$(awk "BEGIN {printf \"%.2f\", $gen_diff / $interval}")
-                        fi
-                    fi
-                fi
-                if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]] && \
-                   [[ "$prev_prompt_tokens" != "N/A" ]] && [[ "$prev_prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    local prompt_diff
-                    prompt_diff=$(awk "BEGIN {print $prompt_tokens - $prev_prompt_tokens}")
-                    if [[ "$prompt_diff" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
-                        # 检测计数器重置（vLLM重启）
-                        if awk "BEGIN {exit ($prompt_diff < 0) ? 0 : 1}"; then
-                            prev_prompt_tokens=$prompt_tokens
-                        else
-                            prompt_tps=$(awk "BEGIN {printf \"%.2f\", $prompt_diff / $interval}")
-                        fi
-                    fi
+                if [ -n "$prompt_tps_result" ]; then
+                    prompt_tps=$(echo "$prompt_tps_result" | jq -r '.data.result[0].value[1] // "N/A"' 2>/dev/null)
                 fi
 
                 # 检查vLLM是否Idle（pending=0且running=0，都是有效数字0）
@@ -1442,22 +1416,23 @@ cmd_monitor() {
                     is_idle=true
                 fi
 
-                if [[ "$gen_tps" != "N/A" ]] && [[ "$gen_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Generation TPS    : %s tokens/s\n" "$gen_tps"
-                    local gen_tps_nonzero
-                    gen_tps_nonzero=$(awk -v val="$gen_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
-                    if [[ "$gen_tps_nonzero" == "1" ]]; then
-                        max_gen_tps=$(awk -v cur="$gen_tps" -v max="$max_gen_tps" 'BEGIN {print (cur > max) ? cur : max}')
+                # Format TPS to 2 decimal places; clamp near-zero values from rate()
+                if [[ "$gen_tps" != "N/A" ]] && [[ "$gen_tps" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+                    local gen_tps_fmt
+                    gen_tps_fmt=$(awk -v v="$gen_tps" 'BEGIN {if (v < 0.005) v=0; printf "%.2f", v}')
+                    printf "  ├─ Generation TPS    : %s tokens/s\n" "$gen_tps_fmt"
+                    if awk -v v="$gen_tps_fmt" 'BEGIN {exit (v > 0) ? 0 : 1}'; then
+                        max_gen_tps=$(awk -v cur="$gen_tps_fmt" -v max="$max_gen_tps" 'BEGIN {print (cur > max) ? cur : max}')
                     fi
                 else
                     echo "  ├─ Generation TPS    :    N/A"
                 fi
-                if [[ "$prompt_tps" != "N/A" ]] && [[ "$prompt_tps" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    printf "  ├─ Prompt TPS        : %s tokens/s\n" "$prompt_tps"
-                    local prompt_tps_nonzero
-                    prompt_tps_nonzero=$(awk -v val="$prompt_tps" 'BEGIN {print (val > 0) ? "1" : "0"}')
-                    if [[ "$prompt_tps_nonzero" == "1" ]]; then
-                        max_prompt_tps=$(awk -v cur="$prompt_tps" -v max="$max_prompt_tps" 'BEGIN {print (cur > max) ? cur : max}')
+                if [[ "$prompt_tps" != "N/A" ]] && [[ "$prompt_tps" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+                    local prompt_tps_fmt
+                    prompt_tps_fmt=$(awk -v v="$prompt_tps" 'BEGIN {if (v < 0.005) v=0; printf "%.2f", v}')
+                    printf "  ├─ Prompt TPS        : %s tokens/s\n" "$prompt_tps_fmt"
+                    if awk -v v="$prompt_tps_fmt" 'BEGIN {exit (v > 0) ? 0 : 1}'; then
+                        max_prompt_tps=$(awk -v cur="$prompt_tps_fmt" -v max="$max_prompt_tps" 'BEGIN {print (cur > max) ? cur : max}')
                     fi
                 else
                     echo "  ├─ Prompt TPS        :    N/A"
@@ -1513,13 +1488,7 @@ cmd_monitor() {
                 fi
                 echo
 
-                # 只在值是有效数字时更新历史值
-                if [[ "$gen_tokens" != "N/A" ]] && [[ "$gen_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    prev_gen_tokens=$gen_tokens
-                fi
-                if [[ "$prompt_tokens" != "N/A" ]] && [[ "$prompt_tokens" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-                    prev_prompt_tokens=$prompt_tokens
-                fi
+                # 只在值是有效数字时更新历史值 (TTFT)
                 if [[ "$cur_ttft_sum" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     prev_ttft_sum=$cur_ttft_sum
                 fi
