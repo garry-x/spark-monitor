@@ -465,6 +465,60 @@
           "decimals": 0
         }
       }
+    },
+    {
+      "type": "graph",
+      "title": "Agent Token Usage (Total)",
+      "gridPos": {
+        "x": 0,
+        "y": 66,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "spark_monitor_agent_tokens_total",
+          "legendFormat": "{{tool}} / {{model}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Cumulative token usage by local AI agents (Claude Code, Codex)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Agent Daily Token Usage",
+      "gridPos": {
+        "x": 12,
+        "y": 66,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "spark_monitor_agent_tokens_daily",
+          "legendFormat": "{{tool}} / {{model}} / {{date}}",
+          "refId": "A"
+        }
+      ],
+      "lines": true,
+      "linewidth": 2,
+      "fill": 1,
+      "description": "Daily token usage by local AI agents (last 7 days)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
     }
   ],
   "templating": {
