@@ -26,7 +26,7 @@ def load_counter_state():
                 return json.load(f)
     except Exception as e:
         logger.warning(f"Failed to load counter state: {e}")
-    return {'generation_tokens': 0, 'prompt_tokens': 0, 'last_effective_gen': 0, 'last_effective_prompt': 0}
+    return {'generation_tokens': 0, 'prompt_tokens': 0, 'last_effective_gen': 0, 'last_effective_prompt': 0, 'model_name': ''}
 
 def save_counter_state(state):
     """Save counter state to file"""
@@ -208,6 +208,18 @@ class VLLMExporter:
                 for gauge in [VLLM_NUM_REQUESTS_WAITING, VLLM_NUM_REQUESTS_RUNNING,
                               VLLM_NUM_REQUESTS_SWAPPED, VLLM_NUM_REQUESTS_SCHEDULED]:
                     gauge._metrics.clear()
+
+                # Detect model change: reset persistent counter for new model
+                prev_model = counter_state.get('model_name', '')
+                if mn and mn != prev_model:
+                    logger.info(f"Model changed: {prev_model!r} -> {mn!r}, resetting counters")
+                    counter_state['generation_tokens'] = 0
+                    counter_state['prompt_tokens'] = 0
+                    counter_state['last_effective_gen'] = 0
+                    counter_state['last_effective_prompt'] = 0
+                    last_gen = 0
+                    last_prompt = 0
+                counter_state['model_name'] = mn
 
                 def val(key):
                     return metrics.get(key, {}).get('value')
