@@ -37,6 +37,27 @@ def save_counter_state(state):
     except Exception as e:
         logger.warning(f"Failed to save counter state: {e}")
 
+def _clean_model_name(raw_name):
+    """
+    Extract human-readable model name from a HuggingFace cache path.
+
+    HF cache path format:
+        /.../models--org--model/snapshots/<hash>  →  org/model
+
+    Non-HF-cache names (e.g. "meta-llama/Llama-2-7b") pass through unchanged.
+    """
+    marker = "/models--"
+    if marker not in raw_name:
+        return raw_name
+
+    try:
+        after_marker = raw_name.split(marker, 1)[1]
+        org_model = after_marker.split("/snapshots/", 1)[0]
+        return org_model.replace("--", "/")
+    except (IndexError, ValueError):
+        return raw_name
+
+
 def calculate_effective_counter(current_value, last_value, last_effective):
     """
     Calculate effective counter value, handling vLLM restart resets.
@@ -162,7 +183,7 @@ class VLLMExporter:
                             model_name = v.strip().strip('"')
                             break
 
-        self._model_name = model_name
+        self._model_name = _clean_model_name(model_name) if model_name else None
         return metrics
 
     @property
