@@ -320,7 +320,7 @@ cmd_help() {
     echo "  ports     Show listening ports and processes"
     echo "            ports check PORT [proto] - Check if port is in use"
 	    echo "            ports pickone - Pick an unused port"
-    echo "  monitor   Show real-time metrics (system|gpu|vllm|all) [-i interval]"
+    echo "  monitor   Show real-time metrics (system|gpu|vllm|agent|all) [-i interval]"
     echo
     echo "Installation Commands:"
     echo "  install   Install CLI and copy config files to user directory"
@@ -346,6 +346,7 @@ cmd_help() {
     echo "  spark-monitor monitor system    # System metrics only"
     echo "  spark-monitor monitor gpu       # GPU metrics only"
     echo "  spark-monitor monitor vllm      # vLLM metrics only"
+    echo "  spark-monitor monitor agent    # Agent token metrics only"
     echo "  spark-monitor monitor -i 10     # 10s refresh"
     echo "  spark-monitor monitor vllm -i 3 # vLLM with 3s refresh"
     echo
@@ -1021,11 +1022,11 @@ cmd_monitor() {
     fi
 
     case "$category" in
-        system|gpu|vllm|all)
+        system|gpu|vllm|agent|all)
             ;;
         *)
             print_error "Invalid category: $category"
-            echo "Valid categories: system, gpu, vllm, all"
+            echo "Valid categories: system, gpu, vllm, agent, all"
             return 1
             ;;
     esac
@@ -1514,6 +1515,55 @@ cmd_monitor() {
                 if [[ "$cur_ttft_count" =~ ^[0-9]+\.?[0-9]*$ ]]; then
                     prev_ttft_count=$cur_ttft_count
                 fi
+                ;;
+        esac
+
+        case "$category" in
+            agent|all)
+                echo -e "${BLUE}┌─────────────────────────────────────┐${NC}"
+                echo -e "${BLUE}│ AGENT TOKEN USAGE                   │${NC}"
+                echo -e "${BLUE}└─────────────────────────────────────┘${NC}"
+
+                local agent_total_result agent_daily_result
+                agent_total_result=$(query_prometheus 'spark_monitor_agent_tokens_total')
+                agent_daily_result=$(query_prometheus 'spark_monitor_agent_tokens_daily')
+
+                # Show cumulative totals by tool
+                local current_tool=""
+                if [ -n "$agent_total_result" ]; then
+                    echo "$agent_total_result" | jq -r '
+                        .data.result
+                        | sort_by(.metric.tool + .metric.model)
+                        | .[]
+                        | "\(.metric.tool)\t\(.metric.model)\t\(.value[1])"
+                    ' 2>/dev/null | while IFS=$'\t' read -r tool model tokens; do
+                        if [[ "$tool" != "$current_tool" ]]; then
+                            current_tool="$tool"
+                            printf "  ├─ Tool: ${GREEN}%s${NC}\n" "$tool"
+                        fi
+                        local tokens_fmt
+                        tokens_fmt=$(format_number "${tokens%.*}")
+                        printf "  │   ├─ %-24s %s tokens\n" "$model" "$tokens_fmt"
+                    done
+                else
+                    echo "  ├─ No agent token data available"
+                fi
+
+                # Show today's usage
+                if [ -n "$agent_daily_result" ]; then
+                    local today
+                    today=$(date +%Y-%m-%d)
+                    local today_tokens
+                    today_tokens=$(echo "$agent_daily_result" | jq -r --arg d "$today" '
+                        [.data.result[] | select(.metric.date == $d) | .value[1] | tonumber] | add // 0
+                    ' 2>/dev/null)
+                    if [[ "$today_tokens" != "0" ]] && [[ "$today_tokens" != "" ]]; then
+                        local today_fmt
+                        today_fmt=$(format_number "${today_tokens%.*}")
+                        printf "  └─ Today (%s): %s tokens\n" "$today" "$today_fmt"
+                    fi
+                fi
+                echo
                 ;;
         esac
 
