@@ -1241,9 +1241,9 @@ cmd_monitor() {
                 local gen_tokens_result prompt_tokens_result pending_result running_result model_name_result
                 gen_tokens_result=$(query_prometheus 'vllm:generation_tokens_total{job="vllm_exporter"}')
                 prompt_tokens_result=$(query_prometheus 'vllm:prompt_tokens_total{job="vllm_exporter"}')
-                pending_result=$(query_prometheus 'vllm:num_requests_waiting')
-                running_result=$(query_prometheus 'vllm:num_requests_running')
-                model_name_result=$(query_prometheus 'vllm:num_requests_running')
+                pending_result=$(query_prometheus 'vllm:num_requests_waiting{job="vllm_exporter"}')
+                running_result=$(query_prometheus 'vllm:num_requests_running{job="vllm_exporter"}')
+                model_name_result=$(query_prometheus 'vllm:num_requests_running{job="vllm_exporter"}')
                 local kv_cache_result
                 kv_cache_result=$(query_prometheus 'vllm:kv_cache_usage_perc')
                 local ttft_sum_result ttft_count_result

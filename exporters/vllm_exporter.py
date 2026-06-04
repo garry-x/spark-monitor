@@ -198,11 +198,16 @@ class VLLMExporter:
         
         try:
             metrics_text = self.fetch_metrics()
-            
+
             if metrics_text:
                 VLLM_UP.set(1)
                 metrics = self.parse_prometheus_metrics(metrics_text)
                 mn = self.model_name or ''
+
+                # Clear stale label combinations from previous models
+                for gauge in [VLLM_NUM_REQUESTS_WAITING, VLLM_NUM_REQUESTS_RUNNING,
+                              VLLM_NUM_REQUESTS_SWAPPED, VLLM_NUM_REQUESTS_SCHEDULED]:
+                    gauge._metrics.clear()
 
                 def val(key):
                     return metrics.get(key, {}).get('value')
