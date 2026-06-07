@@ -80,8 +80,9 @@ def query_gpu_processes():
 
 
 def _query_gpu_processes_nvidia_smi():
-    """Fallback: query nvidia-smi for per-process GPU memory usage."""
+    """Query nvidia-smi for per-process GPU memory usage."""
     import subprocess
+    import re
     try:
         result = subprocess.run(
             ['nvidia-smi', '--query-compute-apps=pid,process_name,used_gpu_memory',
@@ -106,6 +107,34 @@ def _query_gpu_processes_nvidia_smi():
                     continue
                 mem_bytes = int(mem_mb * 1024 * 1024)
                 processes.append({'pid': pid, 'name': name, 'memory_bytes': mem_bytes})
+
+        processes.sort(key=lambda x: x['memory_bytes'], reverse=True)
+        if processes:
+            return processes
+
+        # --query-compute-apps excludes graphics processes. Fall back to parsing
+        # the process table so desktop/browser GPU users still appear in the CLI.
+        result = subprocess.run(
+            ['nvidia-smi'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            return []
+
+        process_re = re.compile(
+            r'^\|\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+(.+?)\s+(\d+)MiB\s+\|$'
+        )
+        for line in result.stdout.splitlines():
+            match = process_re.match(line)
+            if not match:
+                continue
+            pid, name, mem_mb = match.groups()
+            mem_bytes = int(float(mem_mb) * 1024 * 1024)
+            processes.append({
+                'pid': pid,
+                'name': name.strip(),
+                'memory_bytes': mem_bytes,
+            })
 
         processes.sort(key=lambda x: x['memory_bytes'], reverse=True)
         return processes
@@ -192,6 +221,12 @@ def update_metrics():
             name = proc['name']
 
             if pid in _max_tracker:
+                old_name = _max_tracker[pid]['name']
+                if old_name != name:
+                    try:
+                        GPU_PROCESS_MEMORY_MAX.remove(pid, old_name)
+                    except KeyError:
+                        pass
                 if current_bytes > _max_tracker[pid]['max_bytes']:
                     _max_tracker[pid]['max_bytes'] = current_bytes
                 # Update name in case process name changed
@@ -203,6 +238,10 @@ def update_metrics():
         # include active PIDs only (clean up dead PIDs)
         dead_pids = [p for p in _max_tracker if p not in active_pids]
         for pid in dead_pids:
+            try:
+                GPU_PROCESS_MEMORY_MAX.remove(pid, _max_tracker[pid]['name'])
+            except KeyError:
+                pass
             del _max_tracker[pid]
 
         proc_list = [
