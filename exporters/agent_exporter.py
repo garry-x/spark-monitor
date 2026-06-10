@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Agent Token Usage Exporter
-Exposes token usage metrics from local AI coding agents (Claude Code, Codex)
+Exposes token usage metrics from local AI coding agents (Claude Code, Codex, OpenCode)
 for Prometheus scraping.
 """
 
@@ -79,6 +79,173 @@ def collect_claude_tokens(stats_path):
     return cumulative, daily
 
 
+def collect_opencode_json_stats(stats_path):
+    """
+    Read OpenCode stats-cache.json (JSON format) and return:
+    - cumulative: dict of {model_name: total_tokens}
+    - daily: dict of {date_str: {model_name: tokens}}
+    """
+    cumulative = {}
+    daily = {}
+
+    if not os.path.exists(stats_path):
+        logger.debug(f"OpenCode stats file not found: {stats_path}")
+        return cumulative, daily
+
+    try:
+        with open(stats_path, 'r') as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Failed to read OpenCode stats JSON: {e}")
+        return cumulative, daily
+
+    # Support dailyModelTokens format (same as Claude Code)
+    daily_model_tokens = data.get('dailyModelTokens', [])
+    if not daily_model_tokens:
+        # Try tokensByDay format
+        tokens_by_day = data.get('tokensByDay', {})
+        if isinstance(tokens_by_day, dict):
+            for day, models in tokens_by_day.items():
+                if isinstance(models, dict):
+                    if day not in daily:
+                        daily[day] = {}
+                    for model, tokens in models.items():
+                        model_str = str(model)
+                        tokens_int = int(tokens)
+                        if model_str not in cumulative:
+                            cumulative[model_str] = 0
+                        cumulative[model_str] += tokens_int
+                        daily[day][model_str] = daily[day].get(model_str, 0) + tokens_int
+        return cumulative, daily
+
+    for entry in daily_model_tokens:
+        entry_date = entry.get('date', '')
+        tokens_by_model = entry.get('tokensByModel', {})
+        # Also try tokensByModel alias
+        if not tokens_by_model:
+            tokens_by_model = entry.get('tokensByModel', {})
+
+        for model, tokens in tokens_by_model.items():
+            model_str = str(model)
+            tokens_int = int(tokens)
+
+            if model_str not in cumulative:
+                cumulative[model_str] = 0
+            cumulative[model_str] += tokens_int
+
+            if entry_date not in daily:
+                daily[entry_date] = {}
+            daily[entry_date][model_str] = daily[entry_date].get(model_str, 0) + tokens_int
+
+    return cumulative, daily
+
+
+def collect_opencode_db_stats(db_path):
+    """
+    Read OpenCode state database (SQLite format) and return:
+    - cumulative: dict of {model_name: total_tokens}
+    - daily: dict of {date_str: {model_name: tokens}}
+    """
+    cumulative = {}
+    daily = {}
+
+    if not os.path.exists(db_path):
+        logger.debug(f"OpenCode state DB not found: {db_path}")
+        return cumulative, daily
+
+    conn = None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Try common table/column names for sessions/threads
+        # Try threads table (like Codex)
+        try:
+            cursor.execute("""
+                SELECT model, SUM(tokens_used) as total
+                FROM threads
+                WHERE archived=0 AND tokens_used > 0
+                GROUP BY model
+            """)
+            for row in cursor.fetchall():
+                model = row['model'] or 'unknown'
+                cumulative[model] = cumulative.get(model, 0) + (row['total'] or 0)
+        except Exception:
+            pass
+
+        # Try sessions table
+        if not cumulative:
+            try:
+                cursor.execute("""
+                    SELECT model, SUM(tokens_used) as total
+                    FROM sessions
+                    WHERE tokens_used > 0
+                    GROUP BY model
+                """)
+                for row in cursor.fetchall():
+                    model = row['model'] or 'unknown'
+                    cumulative[model] = cumulative.get(model, 0) + (row['total'] or 0)
+            except Exception:
+                pass
+
+        # Daily: try threads table
+        try:
+            seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
+            cursor.execute("""
+                SELECT model,
+                       DATE(datetime(created_at, 'unixepoch')) as day,
+                       SUM(tokens_used) as total
+                FROM threads
+                WHERE archived=0 AND tokens_used > 0
+                  AND DATE(datetime(created_at, 'unixepoch')) >= ?
+                GROUP BY model, day
+                ORDER BY day DESC
+            """, (seven_days_ago,))
+            for row in cursor.fetchall():
+                model = row['model'] or 'unknown'
+                day = row['day']
+                if day not in daily:
+                    daily[day] = {}
+                daily[day][model] = daily[day].get(model, 0) + (row['total'] or 0)
+        except Exception:
+            pass
+
+        # Daily: try sessions table
+        if not daily:
+            try:
+                seven_days_ago = (date.today() - timedelta(days=7)).isoformat()
+                cursor.execute("""
+                    SELECT model,
+                           DATE(datetime(created_at, 'unixepoch')) as day,
+                           SUM(tokens_used) as total
+                    FROM sessions
+                    WHERE tokens_used > 0
+                      AND DATE(datetime(created_at, 'unixepoch')) >= ?
+                    GROUP BY model, day
+                    ORDER BY day DESC
+                """, (seven_days_ago,))
+                for row in cursor.fetchall():
+                    model = row['model'] or 'unknown'
+                    day = row['day']
+                    if day not in daily:
+                        daily[day] = {}
+                    daily[day][model] = daily[day].get(model, 0) + (row['total'] or 0)
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.warning(f"Failed to read OpenCode state DB: {e}")
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+    return cumulative, daily
+
+
 def collect_codex_tokens(db_path):
     """
     Read Codex state_5.sqlite and return:
@@ -140,7 +307,7 @@ def collect_codex_tokens(db_path):
     return cumulative, daily
 
 
-def update_metrics(stats_path, db_path):
+def update_metrics(stats_path, db_path, opencode_json_path=None, opencode_db_path=None):
     """Collect from all sources and update Prometheus metrics."""
     try:
         AGENT_UP.set(1)
@@ -161,10 +328,25 @@ def update_metrics(stats_path, db_path):
             for model, tokens in models.items():
                 AGENT_TOKENS_DAILY.labels(tool='codex', model=model, date=day).set(tokens)
 
+        # Collect from OpenCode (try JSON first, then SQLite DB)
+        opencode_cum = {}
+        opencode_daily = {}
+        if opencode_json_path:
+            opencode_cum, opencode_daily = collect_opencode_json_stats(opencode_json_path)
+        if not opencode_cum and opencode_db_path:
+            opencode_cum, opencode_daily = collect_opencode_db_stats(opencode_db_path)
+
+        for model, tokens in opencode_cum.items():
+            AGENT_TOKENS_TOTAL.labels(tool='opencode', model=model).set(tokens)
+        for day, models in opencode_daily.items():
+            for model, tokens in models.items():
+                AGENT_TOKENS_DAILY.labels(tool='opencode', model=model, date=day).set(tokens)
+
         # Log summary
         total_claude = sum(claude_cum.values())
         total_codex = sum(codex_cum.values())
-        logger.debug(f"Agent tokens: Claude={total_claude}, Codex={total_codex}")
+        total_opencode = sum(opencode_cum.values())
+        logger.debug(f"Agent tokens: Claude={total_claude}, Codex={total_codex}, OpenCode={total_opencode}")
 
     except Exception as e:
         AGENT_UP.set(0)
@@ -176,6 +358,8 @@ def main():
 
     default_claude_stats = os.path.expanduser('~/.claude/stats-cache.json')
     default_codex_db = os.path.expanduser('~/.codex/state_5.sqlite')
+    default_opencode_json = os.path.expanduser('~/.opencode/stats-cache.json')
+    default_opencode_db = os.path.expanduser('~/.opencode/state_5.sqlite')
 
     parser = argparse.ArgumentParser(description='Agent Token Usage Exporter')
     parser.add_argument('--port', type=int,
@@ -190,6 +374,12 @@ def main():
     parser.add_argument('--codex-db',
                         default=os.getenv('CODEX_DB_PATH', default_codex_db),
                         help='Path to Codex state_5.sqlite')
+    parser.add_argument('--opencode-stats',
+                        default=os.getenv('OPENCODE_STATS_PATH', default_opencode_json),
+                        help='Path to OpenCode stats-cache.json')
+    parser.add_argument('--opencode-db',
+                        default=os.getenv('OPENCODE_DB_PATH', default_opencode_db),
+                        help='Path to OpenCode state_5.sqlite')
 
     args = parser.parse_args()
 
@@ -197,9 +387,12 @@ def main():
     logger.info(f"Agent exporter started on port {args.port}")
     logger.info(f"Claude stats: {args.claude_stats}")
     logger.info(f"Codex DB: {args.codex_db}")
+    logger.info(f"OpenCode stats: {args.opencode_stats}")
+    logger.info(f"OpenCode DB: {args.opencode_db}")
 
     while True:
-        update_metrics(args.claude_stats, args.codex_db)
+        update_metrics(args.claude_stats, args.codex_db,
+                       args.opencode_stats, args.opencode_db)
         time.sleep(args.interval)
 
 

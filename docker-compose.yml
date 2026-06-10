@@ -72,7 +72,7 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  # Agent token usage exporter (Claude Code + Codex)
+  # Agent token usage exporter (Claude Code + Codex + OpenCode)
   agent_exporter:
     build:
       context: .
@@ -83,11 +83,15 @@ services:
     volumes:
       - ${HOME}/.claude/stats-cache.json:/root/.claude/stats-cache.json:ro
       - ${HOME}/.codex/state_5.sqlite:/root/.codex/state_5.sqlite:ro
+      - ${HOME}/.opencode/stats-cache.json:/root/.opencode/stats-cache.json:ro
+      - ${HOME}/.opencode/state_5.sqlite:/root/.opencode/state_5.sqlite:ro
     environment:
       - EXPORTER_PORT=9107
       - SCRAPE_INTERVAL=60
       - CLAUDE_STATS_PATH=/root/.claude/stats-cache.json
       - CODEX_DB_PATH=/root/.codex/state_5.sqlite
+      - OPENCODE_STATS_PATH=/root/.opencode/stats-cache.json
+      - OPENCODE_DB_PATH=/root/.opencode/state_5.sqlite
     command: python exporters/agent_exporter.py
     restart: unless-stopped
 

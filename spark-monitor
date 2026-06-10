@@ -319,7 +319,6 @@ cmd_help() {
     echo "  health    Check health of all services"
     echo "  ports     Show listening ports and processes"
     echo "            ports check PORT [proto] - Check if port is in use"
-	    echo "            ports pickone - Pick an unused port"
     echo "  monitor   Show real-time metrics (system|gpu|vllm|agent|all) [-i interval]"
     echo
     echo "Installation Commands:"
@@ -346,7 +345,7 @@ cmd_help() {
     echo "  spark-monitor monitor system    # System metrics only"
     echo "  spark-monitor monitor gpu       # GPU metrics only"
     echo "  spark-monitor monitor vllm      # vLLM metrics only"
-    echo "  spark-monitor monitor agent    # Agent token metrics only"
+    echo "  spark-monitor monitor agent    # Agent token metrics (Claude/Codex/OpenCode)"
     echo "  spark-monitor monitor -i 10     # 10s refresh"
     echo "  spark-monitor monitor vllm -i 3 # vLLM with 3s refresh"
     echo
