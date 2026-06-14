@@ -252,6 +252,56 @@ cmd_logs() {
     fi
 }
 
+# Supervisor process management (single-container mode)
+cmd_supervisor() {
+    local action="${1:-status}"
+    local program="$2"
+
+    check_docker_compose
+    check_project_dir
+
+    case "$action" in
+        status)
+            print_header
+            print_info "Supervisor process status:"
+            echo ""
+            docker exec spark-monitor supervisorctl status 2>/dev/null || {
+                print_error "Failed to query supervisor. Is the container running?"
+                return 1
+            }
+            ;;
+        restart)
+            if [[ -z "$program" ]]; then
+                print_error "Usage: spark-monitor supervisor restart <program>"
+                print_info "Programs: prometheus, grafana, node_exporter, gpu_exporter, vllm_exporter, system_exporter, agent_exporter"
+                return 1
+            fi
+            print_info "Restarting $program..."
+            docker exec spark-monitor supervisorctl restart "$program" 2>/dev/null || {
+                print_error "Failed to restart $program"
+                return 1
+            }
+            print_success "$program restarted"
+            ;;
+        start|stop)
+            if [[ -z "$program" ]]; then
+                print_error "Usage: spark-monitor supervisor $action <program>"
+                return 1
+            fi
+            print_info "${action^}ing $program..."
+            docker exec spark-monitor supervisorctl "$action" "$program" 2>/dev/null || {
+                print_error "Failed to $action $program"
+                return 1
+            }
+            print_success "$program ${action}ed"
+            ;;
+        *)
+            print_error "Unknown action: $action"
+            echo "Usage: spark-monitor supervisor [status|restart|start|stop] [program]"
+            ;;
+    esac
+}
+
 # Query Prometheus API
 query_prometheus() {
     local query="$1"
@@ -320,6 +370,9 @@ cmd_help() {
     echo "  ports     Show listening ports and processes"
     echo "            ports check PORT [proto] - Check if port is in use"
     echo "  monitor   Show real-time metrics (system|gpu|vllm|agent|all) [-i interval]"
+    echo "  supervisor Manage internal processes (single-container mode)"
+    echo "            supervisor status              Show all process status"
+    echo "            supervisor restart <program>   Restart a specific process"
     echo
     echo "Installation Commands:"
     echo "  install   Install CLI and copy config files to user directory"
@@ -520,7 +573,7 @@ cmd_verify() {
     
     # Check required files
     echo "Checking required files..."
-    local required_files=("docker-compose.yml" "prometheus.yml" "custom-dcgm-counters.csv")
+    local required_files=("docker-compose.yml" "prometheus.yml" "custom-dcgm-counters.csv" "Dockerfile" "supervisord.conf")
     for file in "${required_files[@]}"; do
         if [[ -f "$DEFAULT_CONFIG_DIR/$file" ]]; then
             echo "  ✓ $file"
@@ -653,19 +706,14 @@ cmd_install() {
         cp -r "$source_dir/prometheus" "$config_dir/"
     fi
     
-    # Copy Dockerfile for vllm_exporter build
-    if [[ -f "$source_dir/Dockerfile.vllm_exporter" ]]; then
-        cp "$source_dir/Dockerfile.vllm_exporter" "$config_dir/"
+    # Copy unified Dockerfile
+    if [[ -f "$source_dir/Dockerfile" ]]; then
+        cp "$source_dir/Dockerfile" "$config_dir/"
     fi
 
-    # Copy Dockerfile for system_exporter build
-    if [[ -f "$source_dir/Dockerfile.system_exporter" ]]; then
-        cp "$source_dir/Dockerfile.system_exporter" "$config_dir/"
-    fi
-
-    # Copy Dockerfile for agent_exporter build
-    if [[ -f "$source_dir/Dockerfile.agent_exporter" ]]; then
-        cp "$source_dir/Dockerfile.agent_exporter" "$config_dir/"
+    # Copy supervisord config
+    if [[ -f "$source_dir/supervisord.conf" ]]; then
+        cp "$source_dir/supervisord.conf" "$config_dir/"
     fi
 
     # Copy exporters directory
@@ -688,6 +736,8 @@ cmd_install() {
     print_info "Updating configuration paths..."
     sed -i "s|\.\/prometheus\.yml|$config_dir\/prometheus.yml|g" "$config_dir/docker-compose.yml"
     sed -i "s|./custom-dcgm-counters.csv|$config_dir/custom-dcgm-counters.csv|g" "$config_dir/docker-compose.yml"
+    sed -i "s|\.\/prometheus\/alert_rules\.yml|$config_dir\/prometheus\/alert_rules.yml|g" "$config_dir/docker-compose.yml"
+    sed -i "s|\.\/grafana\/|$config_dir\/grafana\/|g" "$config_dir/docker-compose.yml"
     
     # Check if ~/.local/bin is in PATH
     if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
@@ -927,6 +977,8 @@ cmd_upgrade() {
     # Update docker-compose.yml paths
     sed -i "s|\.\/prometheus\.yml|$DEFAULT_CONFIG_DIR\/prometheus.yml|g" "$DEFAULT_CONFIG_DIR/docker-compose.yml"
     sed -i "s|\.\/custom-dcgm-counters\.csv|$DEFAULT_CONFIG_DIR\/custom-dcgm-counters.csv|g" "$DEFAULT_CONFIG_DIR/docker-compose.yml"
+    sed -i "s|\.\/prometheus\/alert_rules\.yml|$DEFAULT_CONFIG_DIR\/prometheus\/alert_rules.yml|g" "$DEFAULT_CONFIG_DIR/docker-compose.yml"
+    sed -i "s|\.\/grafana\/|$DEFAULT_CONFIG_DIR\/grafana\/|g" "$DEFAULT_CONFIG_DIR/docker-compose.yml"
     
     # Update version file
     if [[ -f "$source_dir/VERSION" ]]; then
@@ -944,19 +996,14 @@ cmd_upgrade() {
         cp -r "$source_dir/prometheus" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
     
-    # Copy Dockerfile for vllm_exporter build
-    if [[ -f "$source_dir/Dockerfile.vllm_exporter" ]]; then
-        cp "$source_dir/Dockerfile.vllm_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    # Copy unified Dockerfile
+    if [[ -f "$source_dir/Dockerfile" ]]; then
+        cp "$source_dir/Dockerfile" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
 
-    # Copy Dockerfile for system_exporter build
-    if [[ -f "$source_dir/Dockerfile.system_exporter" ]]; then
-        cp "$source_dir/Dockerfile.system_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
-    fi
-
-    # Copy Dockerfile for agent_exporter build
-    if [[ -f "$source_dir/Dockerfile.agent_exporter" ]]; then
-        cp "$source_dir/Dockerfile.agent_exporter" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
+    # Copy supervisord config
+    if [[ -f "$source_dir/supervisord.conf" ]]; then
+        cp "$source_dir/supervisord.conf" "$DEFAULT_CONFIG_DIR/" 2>/dev/null || true
     fi
 
     # Copy exporters directory
@@ -1563,7 +1610,9 @@ cmd_health() {
         "grafana:3000"
         "node_exporter:9100"
         "gpu_exporter:9400"
+        "vllm_exporter:8001"
         "system_exporter:9106"
+        "agent_exporter:9107"
     )
     
     all_healthy=true
@@ -2038,6 +2087,10 @@ case "$1" in
         ;;
     verify)
         cmd_verify
+        ;;
+    supervisor)
+        shift
+        cmd_supervisor "$@"
         ;;
     help|*)
         cmd_help

@@ -3,108 +3,101 @@
 ## Overview
 Spark-Monitor is a monitoring system for DGXSpark that collects and exposes metrics from various subsystems for visualization in Grafana via Prometheus.
 
+All services run in a single Docker container managed by supervisord.
+
 ## Architecture
 ```
-+------------------+    +------------------+    +------------------+
-|  System Collector|    |  GPU Collector   |    |  vLLM Collector  |
-+------------------+    +------------------+    +------------------+
-         |                     |                     |
-         v                     v                     v
-+------------------+    +------------------+    +------------------+
-|   System Exporter|    |   GPU Exporter   |    |  vLLM Exporter   |
-+------------------+    +------------------+    +------------------+
-         \                     |                     /
-          \                    |                    /
-           \                   |                   /
-            \                  |                  /
-             +-----------------+-----------------+
-                             |
-                         +-----------+
-                         | Prometheus|
-                         +-----------+
-                             |
-                             v
-                      +-----------+
-                      |  Grafana  |
-                      +-----------+
-                             |
-                             v
-                      +-----------+
-                      | OpenCode  |
-                      +-----------+
++------------------------------------------------------------------+
+|                       spark-monitor container                     |
+|                                                                   |
+|  +----------------+  +----------------+  +-------------------+   |
+|  | node_exporter  |  | gpu_exporter   |  | vllm_exporter     |   |
+|  | (prom/node)    |  | (nvidia/dcgm)  |  | (custom Python)   |   |
+|  +----------------+  +----------------+  +-------------------+   |
+|                                                                   |
+|  +----------------+  +----------------+  +-------------------+   |
+|  |system_exporter |  | agent_exporter |  |    Prometheus     |   |
+|  |(custom Python) |  |(custom Python) |  |                   |   |
+|  +----------------+  +----------------+  +-------------------+   |
+|                                                                   |
+|  +----------------------------------------------------------------+  |
+|  |                         Grafana                               |  |
+|  +----------------------------------------------------------------+  |
+|                                                                   |
+|  Process supervisor: supervisord                                  |
++------------------------------------------------------------------+
+                                  |
+                                  v
+                           +-----------+
+                           |  vLLM     |  (host service, scraped directly)
+                           +-----------+
 ```
-*Note: OpenCode service status is collected by a separate checker and exposed via its own exporter.*
+
+*All components run inside a single container. vLLM is an external service scraped from the host.*
 
 ## Components
 
-### 1. System Collector
-- Collects CPU usage (user, system, idle, etc.)
-- Collects memory usage (total, used, free, buffers, cache)
-- Collects I/O statistics (disk read/write, network in/out)
-- Uses /proc filesystem or system commands (vmstat, iostat, etc.)
+### 1. node_exporter (upstream binary)
+- Collects host CPU, memory, disk, network metrics
+- Reads from /proc and /sys (mounted from host)
+- Port: 9100
 
-### 2. GPU Collector
-- Collects GPU utilization, memory usage, temperature, power draw
-- Uses nvidia-smi or NVIDIA Data Center GPU Manager (DCGM)
+### 2. gpu_exporter (NVIDIA DCGM)
+- Collects GPU utilization, memory, temperature, power, NVLink, ECC metrics
+- Uses NVIDIA DCGM libraries
+- Port: 9400
 
-### 3. vLLM Collector
-- Collects vLLM server metrics (if available via metrics endpoint)
-- Alternatively, parses logs for inference metrics (latency, throughput, token counts)
-- May require instrumenting vLLM or using its built-in Prometheus metrics
+### 3. vLLM Exporter (custom Python)
+- Scrapes vLLM metrics endpoint and provides persistent counter state
+- Handles vLLM restart counter resets
+- Port: 8001
 
-### 4. OpenCode Service Checker
-- Performs health checks on OpenCode service endpoints
-- Collects response times, error rates, status codes
-- Exposes as Prometheus metrics
+### 4. System Exporter (custom Python)
+- Collects per-process GPU memory usage via nvidia-smi and NVML
+- Tracks peak memory per PID
+- Requires pid:host and GPU access
+- Port: 9106
 
-### 5. Exporters
-Each collector has a corresponding Prometheus exporter that:
-- Runs as a separate process
-- Exposes metrics on a specific port in Prometheus format
-- Is scraped by Prometheus server
+### 5. Agent Exporter (custom Python)
+- Reads token usage from Claude Code, Codex, and OpenCode local files
+- Exposes cumulative and daily token metrics
+- Port: 9107
 
-### 6. Prometheus Server
-- Scrapes metrics from all exporters at configured intervals
+### 6. Prometheus
+- Scrapes metrics from all exporters
 - Stores time-series data
-- Provides querying interface (PromQL)
+- Evaluates alert rules
+- Port: 9090
 
 ### 7. Grafana
 - Visualizes metrics from Prometheus
-- Provides pre-built dashboards for each subsystem
-- Allows alerting based on metric thresholds
+- Pre-loaded with DGXSpark Overview dashboard
+- Port: 3000
 
-## Implementation Details
+## Process Management
+Supervisord manages all 7 processes inside the container with automatic restart on failure. Startup order:
+1. Priority 100: Prometheus
+2. Priority 200: Grafana, node_exporter, gpu_exporter
+3. Priority 300: vllm_exporter, system_exporter, agent_exporter
 
-### Metrics Naming Convention
-Use Prometheus conventions:
-- Prefix: `spark_monitor_`
-- Subsystem: `system`, `gpu`, `vllm`, `opencode`
-- Metric name: descriptive, with units if applicable (e.g., `_seconds`, `_bytes`, `_total`)
-- Labels: for differentiation (e.g., `instance`, `job`, `gpu_id`)
+## Metrics Naming Convention
+- Prefix: `spark_monitor_` (custom exporters)
+- DCGM metrics: `DCGM_FI_DEV_*`
+- Node metrics: `node_*`
+- vLLM metrics: `vllm:*`
 
-### Example Metrics
-- `spark_monitor_system_cpu_utilization_percent`
-- `spark_monitor_system_memory_used_bytes`
-- `spark_monitor_gpu_utilization_percent{gpu_id="0"}`
-- `spark_monitor_vllm_request_latency_seconds`
-- `spark_monitor_opencode_service_up`
-
-### Deployment
-- Each exporter runs in its own container (or process)
-- Prometheus and Grafana deployed as per their documentation
-- Configuration via files or environment variables
+## Deployment
+- Single Dockerfile with multi-stage build
+- docker-compose.yml defines one service
+- CLI tool (`spark-monitor`) for start/stop/status/logs/health
+- `spark-monitor supervisor status` to inspect internal processes
 
 ## Security Considerations
-- Exporters should only expose necessary metrics
-- Use authentication if exposing to untrusted networks
-- Run exporters with least privileges
-
-## Scalability
-- Horizontal scaling of exporters if needed
-- Prometheus federation for large deployments
-- Grafana can handle multiple users and dashboards
+- Container runs with elevated privileges (pid:host, GPU access) — required for system metrics
+- Host agent stats files mounted read-only
+- Default Grafana credentials: admin/admin (change in production)
 
 ## Management
-- CLI tool (`spark-monitor`) for easy management of all services
-- Provides start/stop/restart/status/logs/health commands
-- Simplifies deployment and operational tasks
+- CLI tool (`spark-monitor`) for easy management
+- Provides start/stop/restart/status/logs/health/supervisor commands
+- Supervisor process-level control via `spark-monitor supervisor`

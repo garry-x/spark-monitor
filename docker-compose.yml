@@ -1,136 +1,71 @@
 services:
-  # System metrics collector
-  node_exporter:
-    image: docker.m.daocloud.io/prom/node-exporter:latest
-    container_name: node_exporter
+  # All-in-one monitoring container: Prometheus, Grafana, exporters
+  spark-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spark-monitor
     ports:
-      - "9100:9100"
+      - "9090:9090"    # Prometheus
+      - "3000:3000"    # Grafana
+      - "9100:9100"    # node_exporter
+      - "9400:9400"    # gpu_exporter (DCGM)
+      - "8001:8001"    # vllm_exporter
+      - "9106:9106"    # system_exporter
+      - "9107:9107"    # agent_exporter
     volumes:
+      # Host system metrics (node_exporter)
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.ignored-mount-points=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/.+)[:]'
-      - '--collector.filesystem.ignored-fs-types=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs)'
 
-  # vLLM metrics exporter with persistence
-  vllm_exporter:
-    build:
-      context: .
-      dockerfile: Dockerfile.vllm_exporter
-    container_name: vllm_exporter
-    ports:
-      - "8001:8001"
-    volumes:
-      - vllm_exporter_data:/root/.config/spark-monitor
+      # Agent stats files (agent_exporter)
+      - ${HOME}/.claude:/host/.claude:ro
+      - ${HOME}/.codex:/host/.codex:ro
+      - ${HOME}/.opencode:/host/.opencode:ro
+
+      # Persistent state (vllm_exporter, system_exporter)
+      - spark-monitor-data:/root/.config/spark-monitor
+
+      # Prometheus data
+      - prometheus_data:/var/lib/prometheus
+
+      # Grafana data
+      - grafana_data:/var/lib/grafana
+
+      # Configuration files (mountable from host for customization)
+      - ./prometheus.yml:/etc/spark-monitor/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/spark-monitor/prometheus/alert_rules.yml:ro
+      - ./custom-dcgm-counters.csv:/etc/spark-monitor/custom-dcgm-counters.csv:ro
+      - ./grafana/provisioning:/etc/spark-monitor/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/spark-monitor/grafana/dashboards:ro
     environment:
+      # Grafana credentials
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+      # vLLM exporter
       - VLLM_URL=http://host.docker.internal:8000
-      - EXPORTER_PORT=8001
-      - SCRAPE_INTERVAL=5
-    working_dir: /app
-    command: python exporters/vllm_exporter.py
+
+      # Agent exporter paths (inside container)
+      - CLAUDE_STATS_PATH=/host/.claude/stats-cache.json
+      - CODEX_DB_PATH=/host/.codex/state_5.sqlite
+      - OPENCODE_STATS_PATH=/host/.opencode/stats-cache.json
+      - OPENCODE_DB_PATH=/host/.opencode/state_5.sqlite
+    pid: "host"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-
-  # GPU metrics collector - NVIDIA DCGM Exporter
-  gpu_exporter:
-    image: nvidia/dcgm-exporter:4.5.2-4.8.1-distroless
-    container_name: gpu_exporter
-    ports:
-      - "9400:9400"
-    environment:
-      - DCGM_EXPORTER_LISTEN_ADDRESS=0.0.0.0:9400
-      - DCGM_EXPORTER_UPDATE_FREQUENCY=1
-      - DCGM_EXPORTER_EXPORT_DEFAULT_METRICS=true
-    volumes:
-      - ./custom-dcgm-counters.csv:/etc/dcgm-exporter/default-counters.csv:ro
-
-  # System metrics exporter (GPU process memory, etc.)
-  system_exporter:
-    build:
-      context: .
-      dockerfile: Dockerfile.system_exporter
-    container_name: system_exporter
-    pid: "host"
-    ports:
-      - "9106:9106"
-    environment:
-      - EXPORTER_PORT=9106
-      - SCRAPE_INTERVAL=15
-    command: python exporters/system_exporter.py
-    volumes:
-      - system_exporter_data:/root/.config/spark-monitor
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
     restart: unless-stopped
-
-  # Agent token usage exporter (Claude Code + Codex + OpenCode)
-  agent_exporter:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent_exporter
-    container_name: agent_exporter
-    ports:
-      - "9107:9107"
-    volumes:
-      - ${HOME}/.claude/stats-cache.json:/root/.claude/stats-cache.json:ro
-      - ${HOME}/.codex/state_5.sqlite:/root/.codex/state_5.sqlite:ro
-      - ${HOME}/.opencode/stats-cache.json:/root/.opencode/stats-cache.json:ro
-      - ${HOME}/.opencode/state_5.sqlite:/root/.opencode/state_5.sqlite:ro
-    environment:
-      - EXPORTER_PORT=9107
-      - SCRAPE_INTERVAL=60
-      - CLAUDE_STATS_PATH=/root/.claude/stats-cache.json
-      - CODEX_DB_PATH=/root/.codex/state_5.sqlite
-      - OPENCODE_STATS_PATH=/root/.opencode/stats-cache.json
-      - OPENCODE_DB_PATH=/root/.opencode/state_5.sqlite
-    command: python exporters/agent_exporter.py
-    restart: unless-stopped
-
-  # Prometheus server
-  prometheus:
-    image: docker.m.daocloud.io/prom/prometheus:latest
-    container_name: prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-
-  # Grafana
-  grafana:
-    image: docker.m.daocloud.io/grafana/grafana:latest
-    container_name: grafana
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-
-  
 
 volumes:
   prometheus_data:
   grafana_data:
-  vllm_exporter_data:
-  system_exporter_data:
+  spark-monitor-data:
